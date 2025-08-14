@@ -11,7 +11,7 @@ using System.Windows.Forms;
 namespace TOCC8_PDV
 {
     public partial class FMain : Form
-    {
+    { 
         public FMain()
         {
             InitializeComponent();
@@ -47,6 +47,7 @@ namespace TOCC8_PDV
                 txtDescricao.Clear();
                 txtPreco.Clear();
                 txtTaxaLucro.Clear();
+                txtPrazoValidade.Clear();
                 dtpDataValidade.Value = DateTime.Now;
                 txtDescricao.Focus();
             }
@@ -100,6 +101,7 @@ namespace TOCC8_PDV
                 txtDescricao.Clear();
                 txtPreco.Clear();
                 txtTaxaLucro.Clear();
+                txtPrazoValidade.Clear();
                 dtpDataValidade.Value = DateTime.Now;
                 txtCodigo.Focus();
             }
@@ -136,6 +138,7 @@ namespace TOCC8_PDV
                 txtDescricao.Clear();
                 txtPreco.Clear();
                 txtTaxaLucro.Clear();
+                txtPrazoValidade.Clear();
                 dtpDataValidade.Value = DateTime.Now;
                 txtCodigo.Focus();
             }
@@ -144,7 +147,9 @@ namespace TOCC8_PDV
 
         private void btnGrafico_Click(object sender, EventArgs e)
         {
-
+            FGrafico f = new FGrafico();
+            f.WindowState = FormWindowState.Maximized;
+            f.ShowDialog();
         }
 
         private void dgvProduto_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -159,5 +164,53 @@ namespace TOCC8_PDV
             this.txtPrazoValidade.Text = (Convert.ToDateTime(dtpDataValidade.Text) - DateTime.Now).Days.ToString() + " dias";
         }
 
+        private void txtCodigo_Leave(object sender, EventArgs e)
+        {
+            TOCC8Entities contexto;
+            produto p;
+            int codigo;
+
+            try
+            {
+                if (this.txtCodigo.Text.Trim().Length > 0)
+                {
+                    codigo = Convert.ToInt32(txtCodigo.Text);
+                    contexto = new TOCC8Entities();
+                    p = contexto.produto.First(c => c.codigo == codigo);
+
+                    if (p != null)
+                    {
+                        this.txtCodigo.Text = p.codigo.ToString();
+                        this.txtDescricao.Text = p.descricao;
+                        this.txtPreco.Text = p.preco.ToString();
+                        this.txtTaxaLucro.Text = p.taxalucro.ToString();
+                        this.dtpDataValidade.Text = p.datavalidade.ToString();
+                        this.txtPrazoValidade.Text = (Convert.ToDateTime(dtpDataValidade.Text) - DateTime.Now).Days.ToString() + " dias";
+                    }
+                    else
+                    {
+                        this.txtDescricao.Focus();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
+        }
+
+        private void txtDescricao_KeyUp(object sender, KeyEventArgs e)
+        {
+            TOCC8Entities contexto;
+
+            try
+            {
+
+                contexto = new TOCC8Entities();
+                var produtos = contexto.produto.Where(c => c.descricao.StartsWith(txtDescricao.Text.ToLower()));
+                this.dgvProduto.DataSource = produtos.ToList();
+            }
+            catch (Exception) { throw; }
+        }
     }
 }

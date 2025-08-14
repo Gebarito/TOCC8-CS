@@ -37,16 +37,6 @@
             <param name="stringBuilder">The <see cref="T:System.Text.StringBuilder"/> to append to.</param>
             <param name="span">The <see cref="T:System.ReadOnlySpan`1"/> to append.</param>
         </member>
-        <member name="M:System.Threading.Tasks.TaskExtensions.WaitAsync(System.Threading.Tasks.Task,System.TimeSpan,System.Threading.CancellationToken)">
-            <summary>
-            Gets a <see cref="T:System.Threading.Tasks.Task"/> that will complete when this <see cref="T:System.Threading.Tasks.Task"/> completes, when the specified timeout expires, or when the specified <see cref="T:System.Threading.CancellationToken"/> has cancellation requested.
-            </summary>
-            <param name="task">The <see cref="T:System.Threading.Tasks.Task"/> representing the asynchronous wait.</param>
-            <param name="timeout">The timeout after which the <see cref="T:System.Threading.Tasks.Task"/> should be faulted with a <see cref="T:System.TimeoutException"/> if it hasn't otherwise completed.</param>
-            <param name="cancellationToken">The <see cref="T:System.Threading.CancellationToken"/> to monitor for a cancellation request.</param>
-            <returns>The <see cref="T:System.Threading.Tasks.Task"/> representing the asynchronous wait.</returns>
-            <remarks>This method reproduces new to the .NET 6.0 API <see cref="T:System.Threading.Tasks.Task"/>.WaitAsync.</remarks>
-        </member>
         <member name="T:Npgsql.BackendMessages.CopyDataMessage">
             <summary>
             Note that this message doesn't actually contain the data, but only the length. Data is processed
@@ -152,6 +142,48 @@
             Specifies the type of SQL statement, e.g. SELECT
             </summary>
         </member>
+        <member name="F:Npgsql.ConnectorPool.Connectors">
+            <summary>
+            Tracks all connectors currently managed by this pool, whether idle or busy.
+            Only updated rarely - when physical connections are opened/closed - but is read in perf-sensitive contexts.
+            </summary>
+        </member>
+        <member name="F:Npgsql.ConnectorPool._idleConnectorReader">
+            <summary>
+            Reader side for the idle connector channel. Contains nulls in order to release waiting attempts after
+            a connector has been physically closed/broken.
+            </summary>
+        </member>
+        <member name="F:Npgsql.ConnectorPool._clearCounter">
+            <summary>
+            Incremented every time this pool is cleared via <see cref="M:Npgsql.NpgsqlConnection.ClearPool(Npgsql.NpgsqlConnection)"/> or
+            <see cref="M:Npgsql.NpgsqlConnection.ClearAllPools"/>. Allows us to identify connections which were
+            created before the clear.
+            </summary>
+        </member>
+        <member name="P:Npgsql.ConnectorSource.UserFacingConnectionString">
+            <summary>
+            Contains the connection string returned to the user from <see cref="P:Npgsql.NpgsqlConnection.ConnectionString"/>
+            after the connection has been opened. Does not contain the password unless Persist Security Info=true.
+            </summary>
+        </member>
+        <member name="T:Npgsql.Internal.ClusterStateCache">
+            <summary>
+            Cache for cluster's state
+            </summary>
+        </member>
+        <member name="M:Npgsql.Internal.ClusterStateCache.RemoveClusterState(System.String,System.Int32)">
+            <summary>
+            Removes the specified cluster's state from cache
+            </summary>
+            <param name="host">Host address</param>
+            <param name="port">Host port</param>
+        </member>
+        <member name="M:Npgsql.Internal.ClusterStateCache.Clear">
+            <summary>
+            Removes every cluster's state from cache
+            </summary>
+        </member>
         <member name="T:Npgsql.Internal.INpgsqlDatabaseInfoFactory">
             <summary>
             A factory which get generate instances of <see cref="T:Npgsql.Internal.NpgsqlDatabaseInfo"/>, which describe a database
@@ -174,6 +206,18 @@
             Represents a connection to a PostgreSQL backend. Unlike NpgsqlConnection objects, which are
             exposed to users, connectors are internal to Npgsql and are recycled by the connection pool.
             </summary>
+        </member>
+        <member name="T:Npgsql.Internal.NpgsqlConnector.GSSPasswordMessageStream">
+            <summary>
+            This Stream is placed between NegotiateStream and the socket's NetworkStream (or SSLStream). It intercepts
+            traffic and performs the following operations:
+            * Outgoing messages are framed in PostgreSQL's PasswordMessage, and incoming are stripped of it.
+            * NegotiateStream frames payloads with a 5-byte header, which PostgreSQL doesn't understand. This header is
+            stripped from outgoing messages and added to incoming ones.
+            </summary>
+            <remarks>
+            See https://referencesource.microsoft.com/#System/net/System/Net/_StreamFramer.cs,16417e735f0e9530,references
+            </remarks>
         </member>
         <member name="F:Npgsql.Internal.NpgsqlConnector._socket">
             <summary>
@@ -226,11 +270,6 @@
         <member name="P:Npgsql.Internal.NpgsqlConnector.BackendProcessId">
             <summary>
             The process ID of the backend for this connector.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Internal.NpgsqlConnector.InferredUserName">
-            <summary>
-            The user name that has been inferred when the connector was opened
             </summary>
         </member>
         <member name="P:Npgsql.Internal.NpgsqlConnector.Id">
@@ -295,6 +334,11 @@
             If this connector was broken, this contains the exception that caused the break.
             </summary>
         </member>
+        <member name="F:Npgsql.Internal.NpgsqlConnector.DatabaseInfoSemaphore">
+            <summary>
+            Semaphore, used to synchronize DatabaseInfo between multiple connections, so it wouldn't be loaded in parallel.
+            </summary>
+        </member>
         <member name="F:Npgsql.Internal.NpgsqlConnector.MultiplexAsyncWritingLock">
             <summary>
             <para>
@@ -322,6 +366,12 @@
             </summary>
             <remarks>Precision is milliseconds</remarks>
         </member>
+        <member name="F:Npgsql.Internal.NpgsqlConnector._userLock">
+            <summary>
+            A lock that's taken while a user action is in progress, e.g. a command being executed.
+            Only used when keepalive is enabled, otherwise null.
+            </summary>
+        </member>
         <member name="P:Npgsql.Internal.NpgsqlConnector.CancelLock">
             <summary>
             A lock that's taken while a cancellation is being delivered; new queries are blocked until the
@@ -348,11 +398,11 @@
             Used only for concurrent use error reporting purposes.
             </summary>
         </member>
-        <member name="P:Npgsql.Internal.NpgsqlConnector.DataSource">
+        <member name="F:Npgsql.Internal.NpgsqlConnector._connectorSource">
             <summary>
             The connector source (e.g. pool) from where this connector came, and to which it will be returned.
-            Note that in multi-host scenarios, this references the host-specific <see cref="T:Npgsql.PoolingDataSource"/> rather than the
-            <see cref="T:Npgsql.NpgsqlMultiHostDataSource"/>.
+            Note that in multi-host scenarios, this references the host-specific <see cref="T:Npgsql.ConnectorPool"/> rather than the
+            <see cref="T:Npgsql.MultiHostConnectorPool"/>,
             </summary>
         </member>
         <member name="P:Npgsql.Internal.NpgsqlConnector.OpenTimestamp">
@@ -549,18 +599,6 @@
             Creates and returns a <see cref="T:Npgsql.NpgsqlBatch"/> object associated with the <see cref="T:Npgsql.Internal.NpgsqlConnector"/>.
             </summary>
             <returns>A <see cref="T:Npgsql.NpgsqlBatch"/> object.</returns>
-        </member>
-        <member name="T:Npgsql.Internal.NpgsqlConnector.GSSPasswordMessageStream">
-            <summary>
-            This Stream is placed between NegotiateStream and the socket's NetworkStream (or SSLStream). It intercepts
-            traffic and performs the following operations:
-            * Outgoing messages are framed in PostgreSQL's PasswordMessage, and incoming are stripped of it.
-            * NegotiateStream frames payloads with a 5-byte header, which PostgreSQL doesn't understand. This header is
-            stripped from outgoing messages and added to incoming ones.
-            </summary>
-            <remarks>
-            See https://referencesource.microsoft.com/#System/net/System/Net/_StreamFramer.cs,16417e735f0e9530,references
-            </remarks>
         </member>
         <member name="T:Npgsql.Internal.ConnectorState">
             <summary>
@@ -825,6 +863,7 @@
             <summary>
             Does not perform any I/O - assuming that the bytes to be skipped are in the memory buffer.
             </summary>
+            <param name="len"></param>
         </member>
         <member name="M:Npgsql.Internal.NpgsqlReadBuffer.Skip(System.Int64,System.Boolean)">
             <summary>
@@ -1051,16 +1090,10 @@
         <member name="M:Npgsql.Internal.TypeHandlers.ByteaHandler.ValidateAndGetLength(System.ArraySegment{System.Byte},Npgsql.Internal.TypeHandling.NpgsqlLengthCache@,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.ByteaHandler.ValidateAndGetLength(System.IO.Stream,Npgsql.Internal.TypeHandling.NpgsqlLengthCache@,Npgsql.NpgsqlParameter)">
-            <inheritdoc />
-        </member>
         <member name="M:Npgsql.Internal.TypeHandlers.ByteaHandler.Write(System.Byte[],Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.Internal.TypeHandling.NpgsqlLengthCache,Npgsql.NpgsqlParameter,System.Boolean,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.ByteaHandler.Write(System.ArraySegment{System.Byte},Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.Internal.TypeHandling.NpgsqlLengthCache,Npgsql.NpgsqlParameter,System.Boolean,System.Threading.CancellationToken)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.ByteaHandler.Write(System.IO.Stream,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.Internal.TypeHandling.NpgsqlLengthCache,Npgsql.NpgsqlParameter,System.Boolean,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
         <member name="P:Npgsql.Internal.TypeHandlers.CompositeHandlers.ICompositeHandler.CompositeType">
@@ -1088,13 +1121,24 @@
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.Read(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
             <inheritdoc />
         </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.ReadPsv(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
+            <remarks>
+            Copied wholesale from Postgresql backend/utils/adt/datetime.c:j2date
+            </remarks>
+        </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.ValidateAndGetLength(System.DateTime,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.ValidateAndGetLength(NpgsqlTypes.NpgsqlDate,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.ValidateAndGetLength(System.Int32,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.Write(System.DateTime,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.Write(NpgsqlTypes.NpgsqlDate,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.DateHandler.Write(System.Int32,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
@@ -1120,10 +1164,19 @@
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.Read(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
             <inheritdoc />
         </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.ReadPsv(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
+            <inheritdoc />
+        </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.ValidateAndGetLength(System.TimeSpan,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.ValidateAndGetLength(NpgsqlTypes.NpgsqlTimeSpan,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.ValidateAndGetLength(NpgsqlTypes.NpgsqlInterval,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.Write(NpgsqlTypes.NpgsqlTimeSpan,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.IntervalHandler.Write(System.TimeSpan,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
@@ -1175,13 +1228,22 @@
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.Read(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
             <inheritdoc />
         </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.ReadPsv(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
+            <inheritdoc />
+        </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.ValidateAndGetLength(System.DateTime,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.ValidateAndGetLength(NpgsqlTypes.NpgsqlDateTime,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.ValidateAndGetLength(System.Int64,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.Write(System.DateTime,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.Write(NpgsqlTypes.NpgsqlDateTime,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampHandler.Write(System.Int64,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
@@ -1210,7 +1272,13 @@
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.Read(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
             <inheritdoc />
         </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.ReadPsv(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,Npgsql.BackendMessages.FieldDescription)">
+            <inheritdoc />
+        </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.ValidateAndGetLength(System.DateTime,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.ValidateAndGetLength(NpgsqlTypes.NpgsqlDateTime,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.ValidateAndGetLength(System.DateTimeOffset,Npgsql.NpgsqlParameter)">
@@ -1220,6 +1288,9 @@
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.Write(System.DateTime,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.Write(NpgsqlTypes.NpgsqlDateTime,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
             <inheritdoc />
         </member>
         <member name="M:Npgsql.Internal.TypeHandlers.DateTimeHandlers.TimestampTzHandler.Write(System.DateTimeOffset,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.NpgsqlParameter)">
@@ -1629,7 +1700,7 @@
         <member name="M:Npgsql.Internal.TypeHandlers.JsonHandler.Read(Npgsql.Internal.NpgsqlReadBuffer,System.Int32,System.Boolean,Npgsql.BackendMessages.FieldDescription)">
             <inheritdoc />
         </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.JsonHandler.GetTextReader(System.IO.Stream,Npgsql.Internal.NpgsqlReadBuffer)">
+        <member name="M:Npgsql.Internal.TypeHandlers.JsonHandler.GetTextReader(System.IO.Stream)">
             <inheritdoc />
         </member>
         <member name="T:Npgsql.Internal.TypeHandlers.JsonPathHandler">
@@ -1661,7 +1732,7 @@
         <member name="M:Npgsql.Internal.TypeHandlers.JsonPathHandler.Write(System.String,Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.Internal.TypeHandling.NpgsqlLengthCache,Npgsql.NpgsqlParameter,System.Boolean,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.JsonPathHandler.GetTextReader(System.IO.Stream,Npgsql.Internal.NpgsqlReadBuffer)">
+        <member name="M:Npgsql.Internal.TypeHandlers.JsonPathHandler.GetTextReader(System.IO.Stream)">
             <inheritdoc />
         </member>
         <member name="T:Npgsql.Internal.TypeHandlers.LTreeHandlers.LQueryHandler">
@@ -2187,7 +2258,7 @@
         </member>
         <member name="T:Npgsql.Internal.TypeHandlers.RecordHandler">
              <summary>
-             Type handler for PostgreSQL record types. Defaults to returning object[], but can also return <see cref="T:System.ValueTuple" /> or <see cref="T:System.Tuple"/>.
+             Type handler for PostgreSQL record types.
              </summary>
              <remarks>
              https://www.postgresql.org/docs/current/static/datatype-pseudo.html
@@ -2198,12 +2269,6 @@
              * The length of the column(32-bit integer), or -1 if null
              * The column data encoded as binary
              </remarks>
-        </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.RecordHandler.CreateRangeHandler(Npgsql.PostgresTypes.PostgresType)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.RecordHandler.CreateMultirangeHandler(Npgsql.PostgresTypes.PostgresMultirangeType)">
-            <inheritdoc />
         </member>
         <member name="T:Npgsql.Internal.TypeHandlers.TextHandler">
              <summary>
@@ -2253,7 +2318,7 @@
         <member name="M:Npgsql.Internal.TypeHandlers.TextHandler.Write(System.Byte[],Npgsql.Internal.NpgsqlWriteBuffer,Npgsql.Internal.TypeHandling.NpgsqlLengthCache,Npgsql.NpgsqlParameter,System.Boolean,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
-        <member name="M:Npgsql.Internal.TypeHandlers.TextHandler.GetTextReader(System.IO.Stream,Npgsql.Internal.NpgsqlReadBuffer)">
+        <member name="M:Npgsql.Internal.TypeHandlers.TextHandler.GetTextReader(System.IO.Stream)">
             <inheritdoc />
         </member>
         <member name="T:Npgsql.Internal.TypeHandlers.UnknownTypeHandler">
@@ -2394,8 +2459,8 @@
              An array of cached lengths for the parameters sending process.
             
              When sending parameters, lengths need to be calculated more than once (once for Bind, once for
-             an array, once for the string within that array). This cache optimizes that. Lengths are added
-             to the cache, and then retrieved in the same order.
+             an array, once for the string within that array). This cache optimized that. Lengths are added
+             to the cache, and then retrieved at the same order.
              </summary>
         </member>
         <member name="M:Npgsql.Internal.TypeHandling.NpgsqlLengthCache.Set(System.Int32)">
@@ -2473,9 +2538,10 @@
         <member name="T:Npgsql.Internal.TypeHandling.NpgsqlSimpleTypeHandlerWithPsv`2">
             <summary>
             A simple type handler that supports a provider-specific value in addition to its default value.
-            This is necessary mainly in cases where the CLR type cannot represent the full range of the PostgreSQL type, and a custom CLR type
-            is needed. The provider-specific type <typeparamref name="TPsv"/> will be returned from calls to
-            <see cref="M:System.Data.Common.DbDataReader.GetProviderSpecificValue(System.Int32)"/>.
+            This is necessary mainly in cases where the CLR type cannot represent the full range of the
+            PostgreSQL type, and a custom CLR type is needed (e.g. <see cref="T:System.DateTime"/> and
+            <see cref="T:NpgsqlTypes.NpgsqlDateTime"/>). The provider-specific type <typeparamref name="TPsv"/> will be returned
+            from calls to <see cref="M:System.Data.Common.DbDataReader.GetProviderSpecificValue(System.Int32)"/>.
             </summary>
             <typeparam name="TDefault">
             The default CLR type that this handler will read and write. For example, calling <see cref="M:System.Data.Common.DbDataReader.GetValue(System.Int32)"/>
@@ -2743,10 +2809,72 @@
             Caches the result.
             </summary>
         </member>
-        <member name="F:Npgsql.MultiplexingDataSource._writeCoalescingBufferThresholdBytes">
+        <member name="T:Npgsql.Logging.ConsoleLoggingProvider">
+            <summary>
+            An logging provider that outputs Npgsql logging messages to standard error.
+            </summary>
+        </member>
+        <member name="M:Npgsql.Logging.ConsoleLoggingProvider.#ctor(Npgsql.Logging.NpgsqlLogLevel,System.Boolean,System.Boolean)">
+            <summary>
+            Constructs a new <see cref="T:Npgsql.Logging.ConsoleLoggingProvider"/>
+            </summary>
+            <param name="minLevel">Only messages of this level of higher will be logged</param>
+            <param name="printLevel">If true, will output the log level (e.g. WARN). Defaults to false.</param>
+            <param name="printConnectorId">If true, will output the connector ID. Defaults to false.</param>
+        </member>
+        <member name="M:Npgsql.Logging.ConsoleLoggingProvider.CreateLogger(System.String)">
+            <summary>
+            Creates a new <see cref="T:Npgsql.Logging.ConsoleLogger"/> instance of the given name.
+            </summary>
+        </member>
+        <member name="T:Npgsql.Logging.INpgsqlLoggingProvider">
+            Used to create logger instances of the given name.
+        </member>
+        <member name="M:Npgsql.Logging.INpgsqlLoggingProvider.CreateLogger(System.String)">
+            <summary>
+            Creates a new INpgsqlLogger instance of the given name.
+            </summary>
+        </member>
+        <member name="T:Npgsql.Logging.NpgsqlLogger">
+            <summary>
+            A generic interface for logging.
+            </summary>
+        </member>
+        <member name="T:Npgsql.Logging.NpgsqlLogManager">
+            <summary>
+            Manages logging for Npgsql, used to set the logging provider.
+            </summary>
+        </member>
+        <member name="P:Npgsql.Logging.NpgsqlLogManager.Provider">
+            <summary>
+            The logging provider used for logging in Npgsql.
+            </summary>
+        </member>
+        <member name="P:Npgsql.Logging.NpgsqlLogManager.IsParameterLoggingEnabled">
+            <summary>
+            Determines whether parameter contents will be logged alongside SQL statements - this may reveal sensitive information.
+            Defaults to false.
+            </summary>
+        </member>
+        <member name="P:Npgsql.MultiplexingConnectorPool.MultiplexingTypeMapper">
+            <summary>
+            A pool-wide type mapper used when multiplexing. This is necessary because binding parameters
+            to their type handlers happens *before* the command is enqueued for execution, so there's no
+            connector yet at that stage.
+            </summary>
+        </member>
+        <member name="F:Npgsql.MultiplexingConnectorPool._writeCoalescingBufferThresholdBytes">
             <summary>
             When multiplexing is enabled, determines the maximum number of outgoing bytes to buffer before
             flushing to the network.
+            </summary>
+        </member>
+        <member name="M:Npgsql.MultiplexingConnectorPool.BootstrapMultiplexing(Npgsql.NpgsqlConnection,Npgsql.Util.NpgsqlTimeout,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            Called exactly once per multiplexing pool, when the first connection is opened, with three goals:
+            1. Load types and bind the pool-wide type mapper (necessary for binding parameters)
+            2. Cause any connection exceptions (e.g. bad username) to be thrown from NpgsqlConnection.Open
+            3. Start the multiplexing write loop after we've made sure that's the exact pool we're going to use
             </summary>
         </member>
         <member name="T:Npgsql.INpgsqlNameTranslator">
@@ -2854,28 +2982,6 @@
         <member name="P:Npgsql.NpgsqlBatch.DbTransaction">
             <inheritdoc />
         </member>
-        <member name="P:Npgsql.NpgsqlBatch.EnableErrorBarriers">
-            <summary>
-            Controls whether to place error barriers between all batch commands within this batch. Default to <see langword="false" />.
-            </summary>
-            <remarks>
-            <para>
-                By default, any exception in a command causes later commands in the batch to be skipped, and earlier commands to be rolled back.
-                Enabling error barriers ensures that errors do not affect other commands in the batch.
-            </para>
-            <para>
-                Note that if the batch is executed within an explicit transaction, the first error places the transaction in a failed state,
-                causing all later commands to fail in any case. As a result, this option is useful mainly when there is no explicit transaction.
-            </para>
-            <para>
-                At the PostgreSQL wire protocol level, this corresponds to inserting a Sync message between each command, rather than grouping
-                all the batch's commands behind a single terminating Sync.
-            </para>
-            <para>
-                To control error barriers on a command-by-command basis, see <see cref="P:Npgsql.NpgsqlBatchCommand.AppendErrorBarrier" />.
-            </para>
-            </remarks>
-        </member>
         <member name="P:Npgsql.NpgsqlBatch.AllResultTypesAreUnknown">
             <summary>
             Marks all of the batch's result columns as either known or unknown.
@@ -2892,9 +2998,6 @@
         </member>
         <member name="M:Npgsql.NpgsqlBatch.CreateDbBatchCommand">
             <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlBatch.CreateBatchCommand">
-            <inheritdoc cref="M:System.Data.Common.DbBatch.CreateBatchCommand"/>
         </member>
         <member name="M:Npgsql.NpgsqlBatch.ExecuteDbDataReader(System.Data.CommandBehavior)">
             <inheritdoc />
@@ -2946,31 +3049,6 @@
         </member>
         <member name="P:Npgsql.NpgsqlBatchCommand.Parameters">
             <inheritdoc cref="P:System.Data.Common.DbBatchCommand.Parameters"/>
-        </member>
-        <member name="P:Npgsql.NpgsqlBatchCommand.AppendErrorBarrier">
-            <summary>
-            Appends an error barrier after this batch command. Defaults to the value of <see cref="P:Npgsql.NpgsqlBatch.EnableErrorBarriers" /> on the
-            batch.
-            </summary>
-            <remarks>
-            <para>
-                By default, any exception in a command causes later commands in the batch to be skipped, and earlier commands to be rolled back.
-                Appending an error barrier ensures that errors from this command (or previous ones) won't cause later commands to be skipped,
-                and that errors from later commands won't cause this command (or previous ones) to be rolled back).
-            </para>
-            <para>
-                Note that if the batch is executed within an explicit transaction, the first error places the transaction in a failed state,
-                causing all later commands to fail in any case. As a result, this option is useful mainly when there is no explicit transaction.
-            </para>
-            <para>
-                At the PostgreSQL wire protocol level, this corresponds to inserting a Sync message after this command, rather than grouping
-                all the batch's commands behind a single terminating Sync.
-            </para>
-            <para>
-                Controlling error barriers on a command-by-command basis is an advanced feature, consider enabling error barriers for the entire
-                batch via <see cref="P:Npgsql.NpgsqlBatch.EnableErrorBarriers" />.
-            </para>
-            </remarks>
         </member>
         <member name="P:Npgsql.NpgsqlBatchCommand.Rows">
             <summary>
@@ -3496,12 +3574,12 @@
             <param name="connection">A <see cref="T:Npgsql.NpgsqlConnection"/> that represents the connection to a PostgreSQL server.</param>
             <param name="transaction">The <see cref="T:Npgsql.NpgsqlTransaction"/> in which the <see cref="T:Npgsql.NpgsqlCommand"/> executes.</param>
         </member>
-        <member name="M:Npgsql.NpgsqlCommand.#ctor(System.Int32,Npgsql.NpgsqlConnection)">
+        <member name="M:Npgsql.NpgsqlCommand.#ctor(System.Collections.Generic.List{Npgsql.NpgsqlBatchCommand})">
             <summary>
             Used when this <see cref="T:Npgsql.NpgsqlCommand"/> instance is wrapped inside an <see cref="T:Npgsql.NpgsqlBatch"/>.
             </summary>
         </member>
-        <member name="M:Npgsql.NpgsqlCommand.#ctor(Npgsql.Internal.NpgsqlConnector,System.Int32)">
+        <member name="M:Npgsql.NpgsqlCommand.#ctor(Npgsql.Internal.NpgsqlConnector,System.Collections.Generic.List{Npgsql.NpgsqlBatchCommand})">
             <summary>
             Used when this <see cref="T:Npgsql.NpgsqlCommand"/> instance is wrapped inside an <see cref="T:Npgsql.NpgsqlBatch"/>.
             </summary>
@@ -3510,7 +3588,7 @@
             <summary>
             Gets or sets the SQL statement or function (stored procedure) to execute at the data source.
             </summary>
-            <value>The SQL statement or function (stored procedure) to execute. The default is an empty string.</value>
+            <value>The Transact-SQL statement or stored procedure to execute. The default is an empty string.</value>
         </member>
         <member name="P:Npgsql.NpgsqlCommand.CommandTimeout">
             <summary>
@@ -3557,14 +3635,14 @@
         <member name="P:Npgsql.NpgsqlCommand.AllResultTypesAreUnknown">
             <summary>
             Marks all of the query's result columns as either known or unknown.
-            Unknown result columns are requested from PostgreSQL in text format, and Npgsql makes no
+            Unknown results column are requested them from PostgreSQL in text format, and Npgsql makes no
             attempt to parse them. They will be accessible as strings only.
             </summary>
         </member>
         <member name="P:Npgsql.NpgsqlCommand.UnknownResultTypeList">
              <summary>
              Marks the query's result columns as known or unknown, on a column-by-column basis.
-             Unknown result columns are requested from PostgreSQL in text format, and Npgsql makes no
+             Unknown results column are requested them from PostgreSQL in text format, and Npgsql makes no
              attempt to parse them. They will be accessible as strings only.
              </summary>
              <remarks>
@@ -3697,7 +3775,7 @@
             Executes the <see cref="P:Npgsql.NpgsqlCommand.CommandText"/> against the <see cref="P:Npgsql.NpgsqlCommand.Connection"/>
             and returns a <see cref="T:Npgsql.NpgsqlDataReader"/>.
             </summary>
-            <param name="behavior">One of the enumeration values that specifies the command behavior.</param>
+            <param name="behavior">One of the enumeration values that specified the command behavior.</param>
             <returns>A task representing the operation.</returns>
         </member>
         <member name="M:Npgsql.NpgsqlCommand.ExecuteReaderAsync(System.Threading.CancellationToken)">
@@ -3717,7 +3795,7 @@
             which executes the <see cref="P:Npgsql.NpgsqlCommand.CommandText"/> against the <see cref="P:Npgsql.NpgsqlCommand.Connection"/>
             and returns a <see cref="T:Npgsql.NpgsqlDataReader"/>.
             </summary>
-            <param name="behavior">One of the enumeration values that specifies the command behavior.</param>
+            <param name="behavior">One of the enumeration values that specified the command behavior.</param>
             <param name="cancellationToken">
             An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
             </param>
@@ -3742,7 +3820,9 @@
             <remarks>As per the specs, no exception will be thrown by this method in case of failure.</remarks>
         </member>
         <member name="M:Npgsql.NpgsqlCommand.Dispose(System.Boolean)">
-            <inheritdoc />
+            <summary>
+            Releases the resources used by the <see cref="T:Npgsql.NpgsqlCommand"/>.
+            </summary>
         </member>
         <member name="M:Npgsql.NpgsqlCommand.FixupRowDescription(Npgsql.BackendMessages.RowDescriptionMessage,System.Boolean)">
             <summary>
@@ -3774,7 +3854,7 @@
         </member>
         <member name="T:Npgsql.NpgsqlCommandBuilder">
             <summary>
-             This class creates database commands for automatic insert, update and delete operations.
+             This class is responsible to create database commands for automatic insert, update and delete operations.
             </summary>
         </member>
         <member name="M:Npgsql.NpgsqlCommandBuilder.#ctor">
@@ -4004,7 +4084,8 @@
         </member>
         <member name="P:Npgsql.NpgsqlConnection.TypeMapper">
             <summary>
-            Connection-level type mapping is no longer supported. See the 7.0 release notes for configuring type mapping on NpgsqlDataSource.
+            The connection-specific type mapper - all modifications affect this connection only,
+            and are lost when it is closed.
             </summary>
         </member>
         <member name="F:Npgsql.NpgsqlConnection.DefaultPort">
@@ -4078,6 +4159,16 @@
             that was previously opened from the pool.
             </p>
             </remarks>
+        </member>
+        <member name="P:Npgsql.NpgsqlConnection.PhysicalOpenCallback">
+            <summary>
+            Gets or sets the delegate used to setup a connection whenever a physical connection is opened synchronously.
+            </summary>
+        </member>
+        <member name="P:Npgsql.NpgsqlConnection.PhysicalOpenAsyncCallback">
+            <summary>
+            Gets or sets the delegate used to setup a connection whenever a physical connection is opened asynchronously.
+            </summary>
         </member>
         <member name="P:Npgsql.NpgsqlConnection.Host">
             <summary>
@@ -4263,17 +4354,16 @@
         </member>
         <member name="P:Npgsql.NpgsqlConnection.UserCertificateValidationCallback">
             <summary>
-            When using SSL/TLS, this is a callback that allows customizing how the PostgreSQL-provided certificate is verified. This is an
-            advanced API, consider using <see cref="F:Npgsql.SslMode.VerifyFull" /> or <see cref="F:Npgsql.SslMode.VerifyCA" /> instead.
-            </summary>
-            <remarks>
+            <para>
+            Verifies the remote Secure Sockets Layer (SSL) certificate used for authentication.
+            </para>
             <para>
             Cannot be used in conjunction with <see cref="F:Npgsql.SslMode.Disable" />, <see cref="F:Npgsql.SslMode.VerifyCA" /> and
             <see cref="F:Npgsql.SslMode.VerifyFull" />.
             </para>
-            <para>
-            See <see href="https://msdn.microsoft.com/en-us/library/system.net.security.remotecertificatevalidationcallback(v=vs.110).aspx"/>.
-            </para>
+            </summary>
+            <remarks>
+            See <see href="https://msdn.microsoft.com/en-us/library/system.net.security.remotecertificatevalidationcallback(v=vs.110).aspx"/>
             </remarks>
         </member>
         <member name="P:Npgsql.NpgsqlConnection.PostgreSqlVersion">
@@ -4444,6 +4534,132 @@
             <remarks>
             See https://www.postgresql.org/docs/current/static/sql-copy.html.
             </remarks>
+        </member>
+        <member name="M:Npgsql.NpgsqlConnection.MapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)">
+             <summary>
+             Maps a CLR enum to a PostgreSQL enum type for use with this connection.
+             </summary>
+             <remarks>
+             CLR enum labels are mapped by name to PostgreSQL enum labels.
+             The translation strategy can be controlled by the <paramref name="nameTranslator"/> parameter,
+             which defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>.
+             You can also use the <see cref="T:NpgsqlTypes.PgNameAttribute"/> on your enum fields to manually specify a PostgreSQL enum label.
+             If there is a discrepancy between the .NET and database labels while an enum is read or written,
+             an exception will be raised.
+            
+             Can only be invoked on an open connection; if the connection is closed the mapping is lost.
+            
+             To avoid mapping the type for each connection, use the <see cref="M:Npgsql.NpgsqlConnection.MapEnumGlobally``1(System.String,Npgsql.INpgsqlNameTranslator)"/> method.
+             </remarks>
+             <param name="pgName">
+             A PostgreSQL type name for the corresponding enum type in the database.
+             If null, the name translator given in <paramref name="nameTranslator"/>will be used.
+             </param>
+             <param name="nameTranslator">
+             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
+             Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
+             </param>
+             <typeparam name="TEnum">The .NET enum type to be mapped</typeparam>
+        </member>
+        <member name="M:Npgsql.NpgsqlConnection.MapEnumGlobally``1(System.String,Npgsql.INpgsqlNameTranslator)">
+             <summary>
+             Maps a CLR enum to a PostgreSQL enum type for use with all connections created from now on. Existing connections aren't affected.
+             </summary>
+             <remarks>
+             CLR enum labels are mapped by name to PostgreSQL enum labels.
+             The translation strategy can be controlled by the <paramref name="nameTranslator"/> parameter,
+             which defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>.
+             You can also use the <see cref="T:NpgsqlTypes.PgNameAttribute"/> on your enum fields to manually specify a PostgreSQL enum label.
+             If there is a discrepancy between the .NET and database labels while an enum is read or written,
+             an exception will be raised.
+            
+             To map the type for a specific connection, use the <see cref="M:Npgsql.NpgsqlConnection.MapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)"/> method.
+             </remarks>
+             <param name="pgName">
+             A PostgreSQL type name for the corresponding enum type in the database.
+             If null, the name translator given in <paramref name="nameTranslator"/>will be used.
+             </param>
+             <param name="nameTranslator">
+             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
+             Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
+             </param>
+             <typeparam name="TEnum">The .NET enum type to be mapped</typeparam>
+        </member>
+        <member name="M:Npgsql.NpgsqlConnection.UnmapEnumGlobally``1(System.String,Npgsql.INpgsqlNameTranslator)">
+            <summary>
+            Removes a previous global enum mapping.
+            </summary>
+            <param name="pgName">
+            A PostgreSQL type name for the corresponding enum type in the database.
+            If null, the name translator given in <paramref name="nameTranslator"/>will be used.
+            </param>
+            <param name="nameTranslator">
+            A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
+            </param>
+        </member>
+        <member name="M:Npgsql.NpgsqlConnection.MapComposite``1(System.String,Npgsql.INpgsqlNameTranslator)">
+             <summary>
+             Maps a CLR type to a PostgreSQL composite type for use with this connection.
+             </summary>
+             <remarks>
+             CLR fields and properties by string to PostgreSQL enum labels.
+             The translation strategy can be controlled by the <paramref name="nameTranslator"/> parameter,
+             which defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>.
+             You can also use the <see cref="T:NpgsqlTypes.PgNameAttribute"/> on your members to manually specify a PostgreSQL enum label.
+             If there is a discrepancy between the .NET and database labels while a composite is read or written,
+             an exception will be raised.
+            
+             Can only be invoked on an open connection; if the connection is closed the mapping is lost.
+            
+             To avoid mapping the type for each connection, use the <see cref="M:Npgsql.NpgsqlConnection.MapCompositeGlobally``1(System.String,Npgsql.INpgsqlNameTranslator)"/> method.
+             </remarks>
+             <param name="pgName">
+             A PostgreSQL type name for the corresponding enum type in the database.
+             If null, the name translator given in <paramref name="nameTranslator"/>will be used.
+             </param>
+             <param name="nameTranslator">
+             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
+             Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
+             </param>
+             <typeparam name="T">The .NET type to be mapped</typeparam>
+        </member>
+        <member name="M:Npgsql.NpgsqlConnection.MapCompositeGlobally``1(System.String,Npgsql.INpgsqlNameTranslator)">
+             <summary>
+             Maps a CLR type to a PostgreSQL composite type for use with all connections created from now on. Existing connections aren't affected.
+             </summary>
+             <remarks>
+             CLR fields and properties by string to PostgreSQL enum labels.
+             The translation strategy can be controlled by the <paramref name="nameTranslator"/> parameter,
+             which defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>.
+             You can also use the <see cref="T:NpgsqlTypes.PgNameAttribute"/> on your members to manually specify a PostgreSQL enum label.
+             If there is a discrepancy between the .NET and database labels while a composite is read or written,
+             an exception will be raised.
+            
+             To map the type for a specific connection, use the <see cref="M:Npgsql.NpgsqlConnection.MapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)"/> method.
+             </remarks>
+             <param name="pgName">
+             A PostgreSQL type name for the corresponding enum type in the database.
+             If null, the name translator given in <paramref name="nameTranslator"/>will be used.
+             </param>
+             <param name="nameTranslator">
+             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
+             Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
+             </param>
+             <typeparam name="T">The .NET type to be mapped</typeparam>
+        </member>
+        <member name="M:Npgsql.NpgsqlConnection.UnmapCompositeGlobally``1(System.String,Npgsql.INpgsqlNameTranslator)">
+            <summary>
+            Removes a previous global enum mapping.
+            </summary>
+            <param name="pgName">
+            A PostgreSQL type name for the corresponding enum type in the database.
+            If null, the name translator given in <paramref name="nameTranslator"/>will be used.
+            </param>
+            <param name="nameTranslator">
+            A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
+            </param>
         </member>
         <member name="M:Npgsql.NpgsqlConnection.Wait(System.Int32)">
             <summary>
@@ -4643,12 +4859,6 @@
             Type changes will appear for other connections only after they are re-opened from the pool.
             </summary>
         </member>
-        <member name="M:Npgsql.NpgsqlConnection.ReloadTypesAsync">
-            <summary>
-            Flushes the type cache for this connection's connection string and reloads the types for this connection only.
-            Type changes will appear for other connections only after they are re-opened from the pool.
-            </summary>
-        </member>
         <member name="E:Npgsql.NpgsqlConnection.Disposed">
             <summary>
             This event is unsupported by Npgsql. Use <see cref="E:System.Data.Common.DbConnection.StateChange"/> instead.
@@ -4718,6 +4928,18 @@
             <param name="database">Database Name</param>
             <param name="username">User</param>
             <returns>A valid password for connecting to the database</returns>
+        </member>
+        <member name="T:Npgsql.PhysicalOpenCallback">
+            <summary>
+            Represents a method that allows the application to setup a connection with custom commands.
+            </summary>
+            <param name="connection">Physical connection to the database</param>
+        </member>
+        <member name="T:Npgsql.PhysicalOpenAsyncCallback">
+            <summary>
+            Represents an asynchronous method that allows the application to setup a connection with custom commands.
+            </summary>
+            <param name="connection">Physical connection to the database</param>
         </member>
         <member name="T:Npgsql.NpgsqlConnectionStringBuilder">
             <summary>
@@ -5352,6 +5574,47 @@
             Logical replication enabled
             </summary>
         </member>
+        <member name="T:Npgsql.TargetSessionAttributes">
+            <summary>
+            Specifies server type preference.
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.Any">
+            <summary>
+            Any successful connection is acceptable.
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.ReadWrite">
+            <summary>
+            Session must accept read-write transactions by default (that is, the server must not be in hot standby mode and the
+            <c>default_transaction_read_only</c> parameter must be off).
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.ReadOnly">
+            <summary>
+            Session must not accept read-write transactions by default (the converse).
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.Primary">
+            <summary>
+            Server must not be in hot standby mode.
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.Standby">
+            <summary>
+            Server must be in hot standby mode.
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.PreferPrimary">
+            <summary>
+            First try to find a primary server, but if none of the listed hosts is a primary server, try again in <see cref="F:Npgsql.TargetSessionAttributes.Any"/> mode.
+            </summary>
+        </member>
+        <member name="F:Npgsql.TargetSessionAttributes.PreferStandby">
+            <summary>
+            First try to find a standby server, but if none of the listed hosts is a standby server, try again in <see cref="F:Npgsql.TargetSessionAttributes.Any"/> mode.
+            </summary>
+        </member>
         <member name="T:Npgsql.NpgsqlRowUpdatedEventHandler">
             <summary>
             Represents the method that handles the <see cref="E:Npgsql.NpgsqlDataAdapter.RowUpdated"/> events.
@@ -5651,7 +5914,7 @@
             Gets the number of columns in the current row.
             </summary>
         </member>
-        <member name="M:Npgsql.NpgsqlDataReader.Consume(System.Boolean,System.Exception)">
+        <member name="M:Npgsql.NpgsqlDataReader.Consume(System.Boolean)">
             <summary>
             Consumes all result sets for this reader, leaving the connector ready for sending and processing further
             queries
@@ -5775,6 +6038,21 @@
             <param name="ordinal">The zero-based column ordinal.</param>
             <returns>The value of the specified column.</returns>
         </member>
+        <member name="M:Npgsql.NpgsqlDataReader.GetDate(System.Int32)">
+            <summary>
+            Gets the value of the specified column as an <see cref="T:NpgsqlTypes.NpgsqlDate"/>,
+            Npgsql's provider-specific type for dates.
+            </summary>
+            <remarks>
+            PostgreSQL's date type represents dates from 4713 BC to 5874897 AD, while .NET's DateTime
+            only supports years from 1 to 1999. If you require years outside this range use this accessor.
+            The standard <see cref="M:System.Data.Common.DbDataReader.GetProviderSpecificValue(System.Int32)"/> method will also return this type, but has
+            the disadvantage of boxing the value.
+            See https://www.postgresql.org/docs/current/static/datatype-datetime.html
+            </remarks>
+            <param name="ordinal">The zero-based column ordinal.</param>
+            <returns>The value of the specified column.</returns>
+        </member>
         <member name="M:Npgsql.NpgsqlDataReader.GetTimeSpan(System.Int32)">
             <summary>
             Gets the value of the specified column as a TimeSpan,
@@ -5783,6 +6061,40 @@
             PostgreSQL's interval type has has a resolution of 1 microsecond and ranges from
             -178000000 to 178000000 years, while .NET's TimeSpan has a resolution of 100 nanoseconds
             and ranges from roughly -29247 to 29247 years.
+            See https://www.postgresql.org/docs/current/static/datatype-datetime.html
+            </remarks>
+            <param name="ordinal">The zero-based column ordinal.</param>
+            <returns>The value of the specified column.</returns>
+        </member>
+        <member name="M:Npgsql.NpgsqlDataReader.GetInterval(System.Int32)">
+            <summary>
+            Gets the value of the specified column as an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>,
+            Npgsql's provider-specific type for time spans.
+            </summary>
+            <remarks>
+            PostgreSQL's interval type has has a resolution of 1 microsecond and ranges from
+            -178000000 to 178000000 years, while .NET's TimeSpan has a resolution of 100 nanoseconds
+            and ranges from roughly -29247 to 29247 years. If you require values from outside TimeSpan's
+            range use this accessor.
+            The standard ADO.NET <see cref="M:System.Data.Common.DbDataReader.GetProviderSpecificValue(System.Int32)"/> method will also return this
+            type, but has the disadvantage of boxing the value.
+            See https://www.postgresql.org/docs/current/static/datatype-datetime.html
+            </remarks>
+            <param name="ordinal">The zero-based column ordinal.</param>
+            <returns>The value of the specified column.</returns>
+        </member>
+        <member name="M:Npgsql.NpgsqlDataReader.GetTimeStamp(System.Int32)">
+            <summary>
+            Gets the value of the specified column as an <see cref="T:NpgsqlTypes.NpgsqlDateTime"/>,
+            Npgsql's provider-specific type for date/time timestamps. Note that this type covers
+            both PostgreSQL's "timestamp with time zone" and "timestamp without time zone" types,
+            which differ only in how they are converted upon input/output.
+            </summary>
+            <remarks>
+            PostgreSQL's timestamp type represents dates from 4713 BC to 5874897 AD, while .NET's DateTime
+            only supports years from 1 to 1999. If you require years outside this range use this accessor.
+            The standard <see cref="M:System.Data.Common.DbDataReader.GetProviderSpecificValue(System.Int32)"/> method will also return this type, but has
+            the disadvantage of boxing the value.
             See https://www.postgresql.org/docs/current/static/datatype-datetime.html
             </remarks>
             <param name="ordinal">The zero-based column ordinal.</param>
@@ -5931,7 +6243,7 @@
         <member name="M:Npgsql.NpgsqlDataReader.GetDataTypeName(System.Int32)">
             <summary>
             Gets the data type information for the specified field.
-            This is the PostgreSQL type name (e.g. double precision), not the .NET type
+            This is be the PostgreSQL type name (e.g. double precision), not the .NET type
             (see <see cref="M:Npgsql.NpgsqlDataReader.GetFieldType(System.Int32)"/> for that).
             </summary>
             <param name="ordinal">The zero-based column index.</param>
@@ -6010,250 +6322,6 @@
             <summary>
             Unbinds reader from the connector.
             Should be called before the connector is returned to the pool.
-            </summary>
-        </member>
-        <member name="T:Npgsql.NpgsqlDataSource">
-            <inheritdoc />
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSource.ConnectionString">
-            <inheritdoc />
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSource.Settings">
-            <summary>
-            Contains the connection string returned to the user from <see cref="P:Npgsql.NpgsqlConnection.ConnectionString"/>
-            after the connection has been opened. Does not contain the password unless Persist Security Info=true.
-            </summary>
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSource.DatabaseInfo">
-            <summary>
-            Information about PostgreSQL and PostgreSQL-like databases (e.g. type definitions, capabilities...).
-            </summary>
-        </member>
-        <member name="F:Npgsql.NpgsqlDataSource._setupMappingsSemaphore">
-            <summary>
-            Semaphore to ensure we don't perform type loading and mapping setup concurrently for this data source.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.CreateConnection">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.OpenConnection">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.OpenDbConnection">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.OpenConnectionAsync(System.Threading.CancellationToken)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.OpenDbConnectionAsync(System.Threading.CancellationToken)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.CreateDbConnection">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.CreateDbCommand(System.String)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.CreateDbBatch">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.CreateCommand(System.String)">
-            <summary>
-            Creates a command ready for use against this <see cref="T:Npgsql.NpgsqlDataSource" />.
-            </summary>
-            <param name="commandText">An optional SQL for the command.</param>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.CreateBatch">
-            <summary>
-            Creates a batch ready for use against this <see cref="T:Npgsql.NpgsqlDataSource" />.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.Create(System.String)">
-            <summary>
-            Creates a new <see cref="T:Npgsql.NpgsqlDataSource" /> for the given <paramref name="connectionString" />.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.Create(Npgsql.NpgsqlConnectionStringBuilder)">
-            <summary>
-            Creates a new <see cref="T:Npgsql.NpgsqlDataSource" /> for the given <paramref name="connectionStringBuilder" />.
-            </summary>
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSource.Password">
-            <summary>
-            Manually sets the password to be used the next time a physical connection is opened.
-            Consider using <see cref="M:Npgsql.NpgsqlDataSourceBuilder.UsePeriodicPasswordProvider(System.Func{Npgsql.NpgsqlConnectionStringBuilder,System.Threading.CancellationToken,System.Threading.Tasks.ValueTask{System.String}},System.TimeSpan,System.TimeSpan)" /> instead.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.Dispose(System.Boolean)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSource.DisposeAsyncCore">
-            <inheritdoc />
-        </member>
-        <member name="T:Npgsql.NpgsqlDataSourceBuilder">
-            <summary>
-            Provides a simple API for configuring and creating an <see cref="T:Npgsql.NpgsqlDataSource" />, from which database connections can be obtained.
-            </summary>
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSourceBuilder.DefaultNameTranslator">
-            <inheritdoc />
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSourceBuilder.ConnectionStringBuilder">
-            <summary>
-            A connection string builder that can be used to configured the connection string on the builder.
-            </summary>
-        </member>
-        <member name="P:Npgsql.NpgsqlDataSourceBuilder.ConnectionString">
-            <summary>
-            Returns the connection string, as currently configured on the builder.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.#ctor(System.String)">
-            <summary>
-            Constructs a new <see cref="T:Npgsql.NpgsqlDataSourceBuilder" />, optionally starting out from the given <paramref name="connectionString"/>.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UseLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory)">
-            <summary>
-            Sets the <see cref="T:Microsoft.Extensions.Logging.ILoggerFactory" /> that will be used for logging.
-            </summary>
-            <param name="loggerFactory">The logger factory to be used.</param>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.EnableParameterLogging(System.Boolean)">
-            <summary>
-            Enables parameters to be included in logging. This includes potentially sensitive information from data sent to PostgreSQL.
-            You should only enable this flag in development, or if you have the appropriate security measures in place based on the
-            sensitivity of this data.
-            </summary>
-            <param name="parameterLoggingEnabled">If <see langword="true" />, then sensitive data is logged.</param>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UseUserCertificateValidationCallback(System.Net.Security.RemoteCertificateValidationCallback)">
-            <summary>
-            When using SSL/TLS, this is a callback that allows customizing how the PostgreSQL-provided certificate is verified. This is an
-            advanced API, consider using <see cref="F:Npgsql.SslMode.VerifyFull" /> or <see cref="F:Npgsql.SslMode.VerifyCA" /> instead.
-            </summary>
-            <param name="userCertificateValidationCallback">The callback containing custom callback verification logic.</param>
-            <remarks>
-            <para>
-            Cannot be used in conjunction with <see cref="F:Npgsql.SslMode.Disable" />, <see cref="F:Npgsql.SslMode.VerifyCA" /> or
-            <see cref="F:Npgsql.SslMode.VerifyFull" />.
-            </para>
-            <para>
-            See <see href="https://msdn.microsoft.com/en-us/library/system.net.security.remotecertificatevalidationcallback(v=vs.110).aspx"/>.
-            </para>
-            </remarks>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UseClientCertificate(System.Security.Cryptography.X509Certificates.X509Certificate)">
-            <summary>
-            Specifies an SSL/TLS certificate which Npgsql will send to PostgreSQL for certificate-based authentication.
-            </summary>
-            <param name="clientCertificate">The client certificate to be sent to PostgreSQL when opening a connection.</param>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UseClientCertificates(System.Security.Cryptography.X509Certificates.X509CertificateCollection)">
-            <summary>
-            Specifies a collection of SSL/TLS certificates which Npgsql will send to PostgreSQL for certificate-based authentication.
-            </summary>
-            <param name="clientCertificates">The client certificate collection to be sent to PostgreSQL when opening a connection.</param>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UseClientCertificatesCallback(System.Action{System.Security.Cryptography.X509Certificates.X509CertificateCollection})">
-            <summary>
-            Specifies a callback to modify the collection of SSL/TLS client certificates which Npgsql will send to PostgreSQL for
-            certificate-based authentication. This is an advanced API, consider using <see cref="M:Npgsql.NpgsqlDataSourceBuilder.UseClientCertificate(System.Security.Cryptography.X509Certificates.X509Certificate)" /> or
-            <see cref="M:Npgsql.NpgsqlDataSourceBuilder.UseClientCertificates(System.Security.Cryptography.X509Certificates.X509CertificateCollection)" /> instead.
-            </summary>
-            <param name="clientCertificatesCallback">The callback to modify the client certificate collection.</param>
-            <remarks>
-            <para>
-            The callback is invoked every time a physical connection is opened, and is therefore suitable for rotating short-lived client
-            certificates. Simply make sure the certificate collection argument has the up-to-date certificate(s).
-            </para>
-            <para>
-            The callback's collection argument already includes any client certificates specified via the connection string or environment
-            variables.
-            </para>
-            </remarks>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UsePeriodicPasswordProvider(System.Func{Npgsql.NpgsqlConnectionStringBuilder,System.Threading.CancellationToken,System.Threading.Tasks.ValueTask{System.String}},System.TimeSpan,System.TimeSpan)">
-            <summary>
-            Configures a periodic password provider, which is automatically called by the data source at some regular interval. This is the
-            recommended way to fetch a rotating access token.
-            </summary>
-            <param name="passwordProvider">A callback which returns the password to be sent to PostgreSQL.</param>
-            <param name="successRefreshInterval">How long to cache the password before re-invoking the callback.</param>
-            <param name="failureRefreshInterval">
-            If a password refresh attempt fails, it will be re-attempted with this interval.
-            This should typically be much lower than <paramref name="successRefreshInterval" />.
-            </param>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-            <remarks>
-            <para>
-            The provided callback is invoked in a timer, and not when opening connections. It therefore doesn't affect opening time.
-            </para>
-            <para>
-            The provided cancellation token is only triggered when the entire data source is disposed. If you'd like to apply a timeout to the
-            token fetching, do so within the provided callback.
-            </para>
-            </remarks>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.AddTypeResolverFactory(Npgsql.Internal.TypeHandling.TypeHandlerResolverFactory)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.MapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UnmapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.MapComposite``1(System.String,Npgsql.INpgsqlNameTranslator)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.MapComposite(System.Type,System.String,Npgsql.INpgsqlNameTranslator)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UnmapComposite``1(System.String,Npgsql.INpgsqlNameTranslator)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UnmapComposite(System.Type,System.String,Npgsql.INpgsqlNameTranslator)">
-            <inheritdoc />
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.UsePhysicalConnectionInitializer(System.Action{Npgsql.NpgsqlConnection},System.Func{Npgsql.NpgsqlConnection,System.Threading.Tasks.Task})">
-            <summary>
-            Register a connection initializer, which allows executing arbitrary commands when a physical database connection is first opened.
-            </summary>
-            <param name="connectionInitializer">
-            A synchronous connection initialization lambda, which will be called from <see cref="M:Npgsql.NpgsqlConnection.Open" /> when a new physical
-            connection is opened.
-            </param>
-            <param name="connectionInitializerAsync">
-            An asynchronous connection initialization lambda, which will be called from
-            <see cref="M:Npgsql.NpgsqlConnection.OpenAsync(System.Threading.CancellationToken)" /> when a new physical connection is opened.
-            </param>
-            <remarks>
-            If an initializer is registered, both sync and async versions must be provided. If you do not use sync APIs in your code, simply
-            throw <see cref="T:System.NotSupportedException" />, which would also catch accidental cases of sync opening.
-            </remarks>
-            <remarks>
-            Take care that the setting you apply in the initializer does not get reverted when the connection is returned to the pool, since
-            Npgsql sends <c>DISCARD ALL</c> by default. The <see cref="P:Npgsql.NpgsqlConnectionStringBuilder.NoResetOnClose" /> option can be used to
-            turn this off.
-            </remarks>
-            <returns>The same builder instance so that multiple calls can be chained.</returns>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.Build">
-            <summary>
-            Builds and returns an <see cref="T:Npgsql.NpgsqlDataSource" /> which is ready for use.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlDataSourceBuilder.BuildMultiHost">
-            <summary>
-            Builds and returns a <see cref="T:Npgsql.NpgsqlMultiHostDataSource" /> which is ready for use for load-balancing and failover scenarios.
             </summary>
         </member>
         <member name="T:Npgsql.NpgsqlException">
@@ -6635,76 +6703,6 @@
             Releases resources at the backend allocated for this stream, iff disposing is true.
             </summary>
             <param name="disposing">Whether to release resources allocated at the backend.</param>
-        </member>
-        <member name="T:Npgsql.NpgsqlLoggingConfiguration">
-            <summary>
-            Configures Npgsql logging
-            </summary>
-        </member>
-        <member name="P:Npgsql.NpgsqlLoggingConfiguration.IsParameterLoggingEnabled">
-            <summary>
-            Determines whether parameter contents will be logged alongside SQL statements - this may reveal sensitive information.
-            Defaults to false.
-            </summary>
-        </member>
-        <member name="M:Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(Microsoft.Extensions.Logging.ILoggerFactory,System.Boolean)">
-            <summary>
-            <para>
-            Globally initializes Npgsql logging to use the provided <paramref name="loggerFactory" />.
-            Must be called before any Npgsql APIs are used.
-            </para>
-            <para>
-            This is a legacy-only, backwards compatibility API. New applications should set the logger factory on
-            <see cref="T:Npgsql.NpgsqlDataSourceBuilder" /> and use the resulting <see cref="T:Npgsql.NpgsqlDataSource"/> instead.
-            </para>
-            </summary>
-            <param name="loggerFactory">The logging factory to use when logging from Npgsql.</param>
-            <param name="parameterLoggingEnabled">
-            Determines whether parameter contents will be logged alongside SQL statements - this may reveal sensitive information.
-            Defaults to <see langword="false" />.
-            </param>
-        </member>
-        <member name="T:Npgsql.NpgsqlMultiHostDataSource">
-            <summary>
-            An <see cref="T:Npgsql.NpgsqlDataSource" /> which manages connections for multiple hosts, is aware of their states (primary, secondary,
-            offline...) and can perform failover and load balancing across them.
-            </summary>
-            <remarks>
-            See <see href="https://www.npgsql.org/doc/failover-and-load-balancing.html" />.
-            </remarks>
-        </member>
-        <member name="M:Npgsql.NpgsqlMultiHostDataSource.CreateConnection(Npgsql.TargetSessionAttributes)">
-            <summary>
-            Returns a new, unopened connection from this data source.
-            </summary>
-            <param name="targetSessionAttributes">Specifies the server type (e.g. primary, standby).</param>
-        </member>
-        <member name="M:Npgsql.NpgsqlMultiHostDataSource.OpenConnection(Npgsql.TargetSessionAttributes)">
-            <summary>
-            Returns a new, opened connection from this data source.
-            </summary>
-            <param name="targetSessionAttributes">Specifies the server type (e.g. primary, standby).</param>
-        </member>
-        <member name="M:Npgsql.NpgsqlMultiHostDataSource.OpenConnectionAsync(Npgsql.TargetSessionAttributes,System.Threading.CancellationToken)">
-            <summary>
-            Returns a new, opened connection from this data source.
-            </summary>
-            <param name="targetSessionAttributes">Specifies the server type (e.g. primary, standby).</param>
-            <param name="cancellationToken">
-            An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
-            </param>
-        </member>
-        <member name="M:Npgsql.NpgsqlMultiHostDataSource.WithTargetSession(Npgsql.TargetSessionAttributes)">
-            <summary>
-            Returns an <see cref="T:Npgsql.NpgsqlDataSource" /> that wraps this multi-host one with the given server type.
-            </summary>
-            <param name="targetSessionAttributes">Specifies the server type (e.g. primary, standby).</param>
-        </member>
-        <member name="M:Npgsql.NpgsqlMultiHostDataSource.ClearDatabaseStates">
-            <summary>
-            Clears the database state (primary, secondary, offline...) for all data sources managed by this multi-host data source.
-            Can be useful to make Npgsql retry a PostgreSQL instance which was previously detected to be offline.
-            </summary>
         </member>
         <member name="T:Npgsql.NpgsqlNestedDataReader">
             <summary>
@@ -7751,31 +7749,14 @@
             <param name="actual">Value from the PGPASS entry</param>
             <returns>True if the values are a match. False otherwise.</returns>
         </member>
-        <member name="F:Npgsql.PoolingDataSource.Connectors">
-            <summary>
-            Tracks all connectors currently managed by this pool, whether idle or busy.
-            Only updated rarely - when physical connections are opened/closed - but is read in perf-sensitive contexts.
-            </summary>
-        </member>
-        <member name="F:Npgsql.PoolingDataSource._idleConnectorReader">
-            <summary>
-            Reader side for the idle connector channel. Contains nulls in order to release waiting attempts after
-            a connector has been physically closed/broken.
-            </summary>
-        </member>
-        <member name="F:Npgsql.PoolingDataSource._clearCounter">
-            <summary>
-            Incremented every time this pool is cleared via <see cref="M:Npgsql.NpgsqlConnection.ClearPool(Npgsql.NpgsqlConnection)"/> or
-            <see cref="M:Npgsql.NpgsqlConnection.ClearAllPools"/>. Allows us to identify connections which were
-            created before the clear.
-            </summary>
-        </member>
         <member name="T:Npgsql.PoolManager">
             <summary>
             Provides lookup for a pool based on a connection string.
             </summary>
             <remarks>
-            Note that pools created directly as <see cref="T:Npgsql.NpgsqlDataSource" /> are referenced directly by users, and aren't managed here.
+            <see cref="M:Npgsql.PoolManager.TryGetValue(System.String,Npgsql.ConnectorSource@)"/> is lock-free, to avoid contention, but the same isn't
+            true of <see cref="M:Npgsql.PoolManager.GetOrAdd(System.String,Npgsql.ConnectorSource)"/>, which acquires a lock. The calling code always tries
+            <see cref="M:Npgsql.PoolManager.TryGetValue(System.String,Npgsql.ConnectorSource@)"/> before trying to <see cref="M:Npgsql.PoolManager.GetOrAdd(System.String,Npgsql.ConnectorSource)"/>.
             </remarks>
         </member>
         <member name="M:Npgsql.PoolManager.Reset">
@@ -7795,6 +7776,11 @@
         <member name="T:Npgsql.PostgresDatabaseInfo">
             <summary>
             The default implementation of NpgsqlDatabase, for standard PostgreSQL databases.
+            </summary>
+        </member>
+        <member name="F:Npgsql.PostgresDatabaseInfo.Log">
+            <summary>
+            The Npgsql logger instance.
             </summary>
         </member>
         <member name="F:Npgsql.PostgresDatabaseInfo._types">
@@ -8423,7 +8409,7 @@
         </member>
         <member name="P:Npgsql.PostgresTypes.PostgresType.InternalName">
             <summary>
-            The data type's internal PostgreSQL name (e.g. <c>_int4</c> not <c>integer[]</c>).
+            The data type's internal PostgreSQL name (e.g. integer[] not _int4).
             See <see cref="P:Npgsql.PostgresTypes.PostgresType.Name"/> for a more user-friendly name.
             </summary>
         </member>
@@ -8517,11 +8503,6 @@
             The statement has been unprepared and is no longer usable.
             </summary>
         </member>
-        <member name="F:Npgsql.PreparedState.Invalidated">
-            <summary>
-            The statement was invalidated because e.g. table schema has changed since preparation.
-            </summary>
-        </member>
         <member name="F:Npgsql.PreparedStatementManager.NumPrepared">
             <summary>
             Total number of current prepared statements (whether explicit or automatic).
@@ -8533,7 +8514,7 @@
             It is not meant to be consumed in common Npgsql usage scenarios.
             </summary>
         </member>
-        <member name="M:Npgsql.Replication.Internal.LogicalReplicationConnectionExtensions.CreateLogicalReplicationSlot(Npgsql.Replication.LogicalReplicationConnection,System.String,System.String,System.Boolean,System.Nullable{Npgsql.Replication.LogicalSlotSnapshotInitMode},System.Boolean,System.Threading.CancellationToken)">
+        <member name="M:Npgsql.Replication.Internal.LogicalReplicationConnectionExtensions.CreateLogicalReplicationSlot(Npgsql.Replication.LogicalReplicationConnection,System.String,System.String,System.Boolean,System.Nullable{Npgsql.Replication.LogicalSlotSnapshotInitMode},System.Threading.CancellationToken)">
             <summary>
             This API is for internal use and for implementing logical replication plugins.
             It is not meant to be consumed in common Npgsql usage scenarios.
@@ -8561,11 +8542,6 @@
             executing the command. This option must be used in a transaction, and <see cref="F:Npgsql.Replication.LogicalSlotSnapshotInitMode.Use"/>
             must be the first command run in that transaction. Finally, <see cref="F:Npgsql.Replication.LogicalSlotSnapshotInitMode.NoExport"/> will
             just use the snapshot for logical decoding as normal but won't do anything else with it.</param>
-            <param name="twoPhase">
-            If <see langword="true"/>, this logical replication slot supports decoding of two-phase transactions. With this option,
-            two-phase commands like PREPARE TRANSACTION, COMMIT PREPARED and ROLLBACK PREPARED are decoded and transmitted.
-            The transaction will be decoded and transmitted at PREPARE TRANSACTION time. The default is <see langword="false"/>.
-            </param>
             <param name="cancellationToken">
             An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
             </param>
@@ -8675,11 +8651,6 @@
             The value is in number of microseconds since PostgreSQL epoch (2000-01-01).
             </summary>
         </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.BeginPrepareMessage">
-            <summary>
-            Logical Replication Protocol begin prepare message
-            </summary>
-        </member>
         <member name="T:Npgsql.Replication.PgOutput.Messages.CommitMessage">
             <summary>
             Logical Replication Protocol commit message
@@ -8711,41 +8682,6 @@
             </summary>
         </member>
         <member name="F:Npgsql.Replication.PgOutput.Messages.CommitMessage.CommitFlags.None">
-            <summary>
-            No flags.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage">
-            <summary>
-            Logical Replication Protocol commit prepared message
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage.Flags">
-            <summary>
-            Flags for the commit prepared; currently unused.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage.CommitPreparedLsn">
-            <summary>
-            The LSN of the commit prepared.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage.CommitPreparedEndLsn">
-            <summary>
-            The end LSN of the commit prepared transaction.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage.TransactionCommitTimestamp">
-            <summary>
-            Commit timestamp of the transaction.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage.CommitPreparedFlags">
-            <summary>
-            Flags for the commit prepared; currently unused.
-            </summary>
-        </member>
-        <member name="F:Npgsql.Replication.PgOutput.Messages.CommitPreparedMessage.CommitPreparedFlags.None">
             <summary>
             No flags.
             </summary>
@@ -8897,56 +8833,6 @@
         <member name="M:Npgsql.Replication.PgOutput.Messages.PgOutputReplicationMessage.ToString">
             <inheritdoc />
         </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.PreparedTransactionControlMessage">
-            <summary>
-            Abstract base class for Logical Replication Protocol prepare and begin prepare message
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.PreparedTransactionControlMessage.TransactionGid">
-            <summary>
-            The user defined GID of the two-phase transaction.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.PrepareMessage">
-            <summary>
-            Logical Replication Protocol prepare message
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.PrepareMessage.Flags">
-            <summary>
-            Flags for the prepare; currently unused.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.PrepareMessage.PrepareFlags">
-            <summary>
-            Flags for the prepare; currently unused.
-            </summary>
-        </member>
-        <member name="F:Npgsql.Replication.PgOutput.Messages.PrepareMessage.PrepareFlags.None">
-            <summary>
-            No flags.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.PrepareMessageBase">
-            <summary>
-            Abstract base class for the logical replication protocol begin prepare and prepare message
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.PrepareMessageBase.PrepareLsn">
-            <summary>
-            The LSN of the prepare.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.PrepareMessageBase.PrepareEndLsn">
-            <summary>
-            The end LSN of the prepared transaction.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.PrepareMessageBase.TransactionPrepareTimestamp">
-            <summary>
-            Prepare timestamp of the transaction.
-            </summary>
-        </member>
         <member name="T:Npgsql.Replication.PgOutput.Messages.RelationMessage">
             <summary>
             Logical Replication Protocol relation message
@@ -9071,46 +8957,6 @@
             Type modifier of the column (atttypmod).
             </summary>
         </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage">
-            <summary>
-            Logical Replication Protocol rollback prepared message
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.Flags">
-            <summary>
-            Flags for the rollback prepared; currently unused.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.PreparedTransactionEndLsn">
-            <summary>
-            The end LSN of the prepared transaction.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.RollbackPreparedEndLsn">
-            <summary>
-            The end LSN of the rollback prepared transaction.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.TransactionPrepareTimestamp">
-            <summary>
-            Prepare timestamp of the transaction.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.TransactionRollbackTimestamp">
-            <summary>
-            Rollback timestamp of the transaction.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.RollbackPreparedFlags">
-            <summary>
-            Flags for the rollback prepared; currently unused.
-            </summary>
-        </member>
-        <member name="F:Npgsql.Replication.PgOutput.Messages.RollbackPreparedMessage.RollbackPreparedFlags.None">
-            <summary>
-            No flags.
-            </summary>
-        </member>
         <member name="T:Npgsql.Replication.PgOutput.Messages.StreamAbortMessage">
             <summary>
             Logical Replication Protocol stream abort message
@@ -9144,26 +8990,6 @@
         <member name="P:Npgsql.Replication.PgOutput.Messages.StreamCommitMessage.TransactionCommitTimestamp">
             <summary>
             Commit timestamp of the transaction.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.StreamPrepareMessage">
-            <summary>
-            Logical Replication Protocol stream prepare message
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.Messages.StreamPrepareMessage.Flags">
-            <summary>
-            Flags for the prepare; currently unused.
-            </summary>
-        </member>
-        <member name="T:Npgsql.Replication.PgOutput.Messages.StreamPrepareMessage.StreamPrepareFlags">
-            <summary>
-            Flags for the prepare; currently unused.
-            </summary>
-        </member>
-        <member name="F:Npgsql.Replication.PgOutput.Messages.StreamPrepareMessage.StreamPrepareFlags.None">
-            <summary>
-            No flags.
             </summary>
         </member>
         <member name="T:Npgsql.Replication.PgOutput.Messages.StreamStartMessage">
@@ -9281,7 +9107,7 @@
             Options to be passed to the pgoutput plugin
             </summary>
         </member>
-        <member name="M:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.#ctor(System.String,System.UInt64,System.Nullable{System.Boolean},System.Nullable{System.Boolean},System.Nullable{System.Boolean},System.Nullable{System.Boolean})">
+        <member name="M:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.#ctor(System.String,System.UInt64,System.Nullable{System.Boolean},System.Nullable{System.Boolean},System.Nullable{System.Boolean})">
             <summary>
             Creates a new instance of <see cref="T:Npgsql.Replication.PgOutput.PgOutputReplicationOptions"/>.
             </summary>
@@ -9290,9 +9116,8 @@
             <param name="binary">Send values in binary representation</param>
             <param name="streaming">Enable streaming of in-progress transactions</param>
             <param name="messages">Write logical decoding messages into the replication stream</param>
-            <param name="twoPhase">Enable streaming of prepared transactions</param>
         </member>
-        <member name="M:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.#ctor(System.Collections.Generic.IEnumerable{System.String},System.UInt64,System.Nullable{System.Boolean},System.Nullable{System.Boolean},System.Nullable{System.Boolean},System.Nullable{System.Boolean})">
+        <member name="M:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.#ctor(System.Collections.Generic.IEnumerable{System.String},System.UInt64,System.Nullable{System.Boolean},System.Nullable{System.Boolean},System.Nullable{System.Boolean})">
             <summary>
             Creates a new instance of <see cref="T:Npgsql.Replication.PgOutput.PgOutputReplicationOptions"/>.
             </summary>
@@ -9301,7 +9126,6 @@
             <param name="binary">Send values in binary representation</param>
             <param name="streaming">Enable streaming of in-progress transactions</param>
             <param name="messages">Write logical decoding messages into the replication stream</param>
-            <param name="twoPhase">Enable streaming of prepared transactions</param>
         </member>
         <member name="P:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.ProtocolVersion">
             <summary>
@@ -9335,14 +9159,6 @@
             </summary>
             <remarks>
             This works in PostgreSQL versions 14+
-            </remarks>
-        </member>
-        <member name="P:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.TwoPhase">
-            <summary>
-            Enable streaming of prepared transactions
-            </summary>
-            <remarks>
-            This works in PostgreSQL versions 15+
             </remarks>
         </member>
         <member name="M:Npgsql.Replication.PgOutput.PgOutputReplicationOptions.Equals(Npgsql.Replication.PgOutput.PgOutputReplicationOptions)">
@@ -9516,7 +9332,7 @@
             Extension methods to use <see cref="T:Npgsql.Replication.LogicalReplicationConnection"/> with the pg_output logical decoding plugin.
             </summary>
         </member>
-        <member name="M:Npgsql.Replication.PgOutputConnectionExtensions.CreatePgOutputReplicationSlot(Npgsql.Replication.LogicalReplicationConnection,System.String,System.Boolean,System.Nullable{Npgsql.Replication.LogicalSlotSnapshotInitMode},System.Boolean,System.Threading.CancellationToken)">
+        <member name="M:Npgsql.Replication.PgOutputConnectionExtensions.CreatePgOutputReplicationSlot(Npgsql.Replication.LogicalReplicationConnection,System.String,System.Boolean,System.Nullable{Npgsql.Replication.LogicalSlotSnapshotInitMode},System.Threading.CancellationToken)">
             <summary>
             Creates a <see cref="T:Npgsql.Replication.Internal.LogicalReplicationSlot"/> class that wraps a replication slot using the
             "pgoutput" logical decoding plugin and can be used to start streaming replication via the logical
@@ -9543,11 +9359,6 @@
             command. This option must be used in a transaction, and <see cref="F:Npgsql.Replication.LogicalSlotSnapshotInitMode.Use"/> must be the
             first command run in that transaction. Finally, <see cref="F:Npgsql.Replication.LogicalSlotSnapshotInitMode.NoExport"/> will just use
             the snapshot for logical decoding as normal but won't do anything else with it.
-            </param>
-            <param name="twoPhase">
-            If <see langword="true"/>, this logical replication slot supports decoding of two-phase transactions. With this option,
-            two-phase commands like PREPARE TRANSACTION, COMMIT PREPARED and ROLLBACK PREPARED are decoded and transmitted.
-            The transaction will be decoded and transmitted at PREPARE TRANSACTION time. The default is <see langword="false"/>.
             </param>
             <param name="cancellationToken">
             An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
@@ -9610,27 +9421,10 @@
             <param name="cancellationToken">
             An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
             </param>
-            <returns>A <see cref="T:System.Threading.Tasks.Task`1"/> representing a <see cref="T:Npgsql.Replication.PhysicalReplicationSlot"/> that represents the
-            newly-created replication slot.
+            <returns>A <see cref="T:Npgsql.Replication.PhysicalReplicationSlot"/> that wraps the newly-created replication slot.
             </returns>
         </member>
-        <member name="M:Npgsql.Replication.PhysicalReplicationConnection.ReadReplicationSlot(System.String,System.Threading.CancellationToken)">
-            <summary>
-            Read some information associated to a replication slot.
-            <remarks>
-            This command is currently only supported for physical replication slots.
-            </remarks>
-            </summary>
-            <param name="slotName">
-            The name of the slot to read. Must be a valid replication slot name
-            </param>
-            <param name="cancellationToken">
-            An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
-            </param>
-            <returns>A <see cref="T:System.Threading.Tasks.Task`1"/> representing a <see cref="T:Npgsql.Replication.PhysicalReplicationSlot"/> or <see langword="null"/>
-            if the replication slot does not exist.</returns>
-        </member>
-        <member name="M:Npgsql.Replication.PhysicalReplicationConnection.StartReplication(Npgsql.Replication.PhysicalReplicationSlot,NpgsqlTypes.NpgsqlLogSequenceNumber,System.Threading.CancellationToken,System.UInt64)">
+        <member name="M:Npgsql.Replication.PhysicalReplicationConnection.StartReplication(Npgsql.Replication.PhysicalReplicationSlot,NpgsqlTypes.NpgsqlLogSequenceNumber,System.Threading.CancellationToken,System.UInt32)">
             <summary>
             Instructs the server to start streaming the WAL for physical replication, starting at WAL location
             <paramref name="walLocation"/>. The server can reply with an error, for example if the requested
@@ -9651,7 +9445,7 @@
             <returns>A <see cref="T:System.Threading.Tasks.Task`1"/> representing an <see cref="T:System.Collections.Generic.IAsyncEnumerable`1"/> that
             can be used to stream WAL entries in form of <see cref="T:Npgsql.Replication.XLogDataMessage"/> instances.</returns>
         </member>
-        <member name="M:Npgsql.Replication.PhysicalReplicationConnection.StartReplication(NpgsqlTypes.NpgsqlLogSequenceNumber,System.Threading.CancellationToken,System.UInt64)">
+        <member name="M:Npgsql.Replication.PhysicalReplicationConnection.StartReplication(NpgsqlTypes.NpgsqlLogSequenceNumber,System.Threading.CancellationToken,System.UInt32)">
             <summary>
             Instructs the server to start streaming the WAL for logical replication, starting at WAL location
             <paramref name="walLocation"/>. The server can reply with an error, for example if the requested
@@ -9668,34 +9462,12 @@
             <returns>A <see cref="T:System.Threading.Tasks.Task`1"/> representing an <see cref="T:System.Collections.Generic.IAsyncEnumerable`1"/> that
             can be used to stream WAL entries in form of <see cref="T:Npgsql.Replication.XLogDataMessage"/> instances.</returns>
         </member>
-        <member name="M:Npgsql.Replication.PhysicalReplicationConnection.StartReplication(Npgsql.Replication.PhysicalReplicationSlot,System.Threading.CancellationToken)">
-            <summary>
-            Instructs the server to start streaming the WAL for physical replication, starting at the WAL location
-            and timeline id specified in <paramref name="slot"/>. The server can reply with an error, for example
-            if the requested section of the WAL has already been recycled.
-            </summary>
-            <remarks>
-            If the client requests a timeline that's not the latest but is part of the history of the server, the server
-            will stream all the WAL on that timeline starting from the requested start point up to the point where the
-            server switched to another timeline.
-            </remarks>
-            <param name="slot">
-            The replication slot that will be updated as replication progresses so that the server
-            knows which WAL segments are still needed by the standby.
-            <remarks>
-            The <paramref name="slot"/> must contain a valid <see cref="P:Npgsql.Replication.PhysicalReplicationSlot.RestartLsn"/> to be used for this overload.
-            </remarks>
-            </param>
-            <param name="cancellationToken">The token to be used for stopping the replication.</param>
-            <returns>A <see cref="T:System.Threading.Tasks.Task`1"/> representing an <see cref="T:System.Collections.Generic.IAsyncEnumerable`1"/> that
-            can be used to stream WAL entries in form of <see cref="T:Npgsql.Replication.XLogDataMessage"/> instances.</returns>
-        </member>
         <member name="T:Npgsql.Replication.PhysicalReplicationSlot">
             <summary>
             Wraps a replication slot that uses physical replication.
             </summary>
         </member>
-        <member name="M:Npgsql.Replication.PhysicalReplicationSlot.#ctor(System.String,System.Nullable{NpgsqlTypes.NpgsqlLogSequenceNumber},System.Nullable{System.UInt64})">
+        <member name="M:Npgsql.Replication.PhysicalReplicationSlot.#ctor(System.String)">
             <summary>
             Creates a new <see cref="T:Npgsql.Replication.PhysicalReplicationSlot"/> instance.
             </summary>
@@ -9704,18 +9476,6 @@
             that has been initialized for physical replication.
             </remarks>
             <param name="slotName">The name of the existing replication slot</param>
-            <param name="restartLsn">The replication slot's <c>restart_lsn</c></param>
-            <param name="restartTimeline">The timeline ID associated to <c>restart_lsn</c>, following the current timeline history.</param>
-        </member>
-        <member name="P:Npgsql.Replication.PhysicalReplicationSlot.RestartLsn">
-            <summary>
-            The replication slot's <c>restart_lsn</c>.
-            </summary>
-        </member>
-        <member name="P:Npgsql.Replication.PhysicalReplicationSlot.RestartTimeline">
-            <summary>
-            The timeline ID associated to <c>restart_lsn</c>, following the current timeline history.
-            </summary>
         </member>
         <member name="T:Npgsql.Replication.ReplicationConnection">
             <summary>
@@ -9918,11 +9678,6 @@
             <summary>
             The server's system clock at the time this message was transmitted, as microseconds since midnight on 2000-01-01.
             </summary>
-            <remarks>
-            Since the client using Npgsql and the server may be located in different time zones,
-            as of Npgsql 7.0 this value is no longer converted to local time but keeps its original value in UTC.
-            You can check <see cref="P:System.DateTime.Kind"/> if you don't want to introduce behavior depending on Npgsql versions.
-            </remarks>
         </member>
         <member name="T:Npgsql.Replication.ReplicationSlot">
             <summary>
@@ -10117,7 +9872,7 @@
             See <a href="https://www.postgresql.org/docs/current/test-decoding.html">https://www.postgresql.org/docs/current/test-decoding.html</a>.
             </summary>
         </member>
-        <member name="M:Npgsql.Replication.TestDecodingConnectionExtensions.CreateTestDecodingReplicationSlot(Npgsql.Replication.LogicalReplicationConnection,System.String,System.Boolean,System.Nullable{Npgsql.Replication.LogicalSlotSnapshotInitMode},System.Boolean,System.Threading.CancellationToken)">
+        <member name="M:Npgsql.Replication.TestDecodingConnectionExtensions.CreateTestDecodingReplicationSlot(Npgsql.Replication.LogicalReplicationConnection,System.String,System.Boolean,System.Nullable{Npgsql.Replication.LogicalSlotSnapshotInitMode},System.Threading.CancellationToken)">
             <summary>
             Creates a <see cref="T:Npgsql.Replication.TestDecoding.TestDecodingReplicationSlot"/> class that wraps a replication slot using the
             test_decoding logical decoding plugin.
@@ -10143,11 +9898,6 @@
             command. This option must be used in a transaction, and <see cref="F:Npgsql.Replication.LogicalSlotSnapshotInitMode.Use"/> must be the
             first command run in that transaction. Finally, <see cref="F:Npgsql.Replication.LogicalSlotSnapshotInitMode.NoExport"/> will just use
             the snapshot for logical decoding as normal but won't do anything else with it.
-            </param>
-            <param name="twoPhase">
-            If <see langword="true"/>, this logical replication slot supports decoding of two-phase transactions. With this option,
-            two-phase commands like PREPARE TRANSACTION, COMMIT PREPARED and ROLLBACK PREPARED are decoded and transmitted.
-            The transaction will be decoded and transmitted at PREPARE TRANSACTION time. The default is <see langword="false"/>.
             </param>
             <param name="cancellationToken">
             An optional token to cancel the asynchronous operation. The default value is <see cref="P:System.Threading.CancellationToken.None"/>.
@@ -10265,9 +10015,6 @@
         <member name="P:Npgsql.Schema.NpgsqlDbColumn.IsAutoIncrement">
             <inheritdoc cref="P:System.Data.Common.DbColumn.IsAutoIncrement" />
         </member>
-        <member name="P:Npgsql.Schema.NpgsqlDbColumn.IsIdentity">
-            <inheritdoc cref="P:System.Data.Common.DbColumn.IsIdentity" />
-        </member>
         <member name="P:Npgsql.Schema.NpgsqlDbColumn.IsKey">
             <inheritdoc cref="P:System.Data.Common.DbColumn.IsKey" />
         </member>
@@ -10365,89 +10112,74 @@
             parameters.
             </param>
         </member>
-        <member name="T:Npgsql.TargetSessionAttributes">
+        <member name="M:Npgsql.TaskExtensions.WithTimeout``1(System.Threading.Tasks.Task{``0},Npgsql.Util.NpgsqlTimeout)">
             <summary>
-            Specifies server type preference.
+            Utility that simplifies awaiting a task with a timeout. If the given task does not
+            complete within <paramref name="timeout"/>, a <see cref="T:System.TimeoutException"/> is thrown.
+            </summary>
+            <param name="task">The task to be awaited</param>
+            <param name="timeout">How much time to allow <paramref name="task"/> to complete before throwing a <see cref="T:System.TimeoutException"/></param>
+            <returns>An awaitable task that represents the original task plus the timeout</returns>
+        </member>
+        <member name="M:Npgsql.TaskExtensions.WithCancellation``1(System.Threading.Tasks.Task{``0},System.Threading.CancellationToken)">
+            <summary>
+            Allows you to cancel awaiting for a non-cancellable task.
+            </summary>
+            <remarks>
+            Read https://blogs.msdn.com/b/pfxteam/archive/2012/10/05/how-do-i-cancel-non-cancelable-async-operations.aspx
+            and be very careful with this.
+            </remarks>
+        </member>
+        <member name="M:Npgsql.TaskExtensions.WithTimeout(System.Threading.Tasks.Task,Npgsql.Util.NpgsqlTimeout)">
+            <summary>
+            Utility that simplifies awaiting a task with a timeout. If the given task does not
+            complete within <paramref name="timeout"/>, a <see cref="T:System.TimeoutException"/> is thrown.
+            </summary>
+            <param name="task">The task to be awaited</param>
+            <param name="timeout">How much time to allow <paramref name="task"/> to complete before throwing a <see cref="T:System.TimeoutException"/></param>
+            <returns>An awaitable task that represents the original task plus the timeout</returns>
+        </member>
+        <member name="M:Npgsql.TaskExtensions.WithCancellation(System.Threading.Tasks.Task,System.Threading.CancellationToken)">
+            <summary>
+            Allows you to cancel awaiting for a non-cancellable task.
+            </summary>
+            <remarks>
+            Read https://blogs.msdn.com/b/pfxteam/archive/2012/10/05/how-do-i-cancel-non-cancelable-async-operations.aspx
+            and be very careful with this.
+            </remarks>
+        </member>
+        <member name="P:Npgsql.TypeMapping.ConnectorTypeMapper.ChangeCounter">
+            <summary>
+            Copy of <see cref="P:Npgsql.TypeMapping.GlobalTypeMapper.ChangeCounter"/> at the time when this
+            mapper was created, to detect mapping changes. If changes are made to this connection's
+            mapper, the change counter is set to -1.
             </summary>
         </member>
-        <member name="F:Npgsql.TargetSessionAttributes.Any">
+        <member name="M:Npgsql.TypeMapping.ConnectorTypeMapper.ResolveByOID(System.UInt32)">
             <summary>
-            Any successful connection is acceptable.
+            Looks up a type handler by its PostgreSQL type's OID.
             </summary>
+            <param name="oid">A PostgreSQL type OID</param>
+            <returns>A type handler that can be used to encode and decode values.</returns>
         </member>
-        <member name="F:Npgsql.TargetSessionAttributes.ReadWrite">
+        <member name="P:Npgsql.TypeMapping.GlobalTypeMapper.ChangeCounter">
             <summary>
-            Session must accept read-write transactions by default (that is, the server must not be in hot standby mode and the
-            <c>default_transaction_read_only</c> parameter must be off).
+            A counter that is incremented whenever a global mapping change occurs.
+            Used to invalidate bound type mappers.
             </summary>
-        </member>
-        <member name="F:Npgsql.TargetSessionAttributes.ReadOnly">
-            <summary>
-            Session must not accept read-write transactions by default (the converse).
-            </summary>
-        </member>
-        <member name="F:Npgsql.TargetSessionAttributes.Primary">
-            <summary>
-            Server must not be in hot standby mode.
-            </summary>
-        </member>
-        <member name="F:Npgsql.TargetSessionAttributes.Standby">
-            <summary>
-            Server must be in hot standby mode.
-            </summary>
-        </member>
-        <member name="F:Npgsql.TargetSessionAttributes.PreferPrimary">
-            <summary>
-            First try to find a primary server, but if none of the listed hosts is a primary server, try again in <see cref="F:Npgsql.TargetSessionAttributes.Any"/> mode.
-            </summary>
-        </member>
-        <member name="F:Npgsql.TargetSessionAttributes.PreferStandby">
-            <summary>
-            First try to find a standby server, but if none of the listed hosts is a standby server, try again in <see cref="F:Npgsql.TargetSessionAttributes.Any"/> mode.
-            </summary>
-        </member>
-        <member name="T:Npgsql.TaskTimeoutAndCancellation">
-            <summary>
-            Utility class to execute a potentially non-cancellable <see cref="T:System.Threading.Tasks.Task"/> while allowing to timeout and/or cancel awaiting for it and at the same time prevent <see cref="E:System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/> event if the original <see cref="T:System.Threading.Tasks.Task"/> fails later.
-            </summary>
-        </member>
-        <member name="M:Npgsql.TaskTimeoutAndCancellation.ExecuteAsync``1(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task{``0}},Npgsql.Util.NpgsqlTimeout,System.Threading.CancellationToken)">
-            <summary>
-            Executes a potentially non-cancellable <see cref="T:System.Threading.Tasks.Task`1"/> while allowing to timeout and/or cancel awaiting for it.
-            If the given task does not complete within <paramref name="timeout"/>, a <see cref="T:System.TimeoutException"/> is thrown.
-            The executed <see cref="T:System.Threading.Tasks.Task`1"/> may be left in an incomplete state after the <see cref="T:System.Threading.Tasks.Task`1"/> that this method returns completes dues to timeout and/or cancellation request.
-            The method guarantees that the abandoned, incomplete <see cref="T:System.Threading.Tasks.Task`1"/> is not going to produce <see cref="E:System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/> event if it fails later.
-            </summary>
-            <param name="getTaskFunc">Gets the <see cref="T:System.Threading.Tasks.Task`1"/> for execution with a combined <see cref="T:System.Threading.CancellationToken"/> that attempts to cancel the <see cref="T:System.Threading.Tasks.Task`1"/> in an event of the timeout or external cancellation request.</param>
-            <param name="timeout">The timeout after which the <see cref="T:System.Threading.Tasks.Task`1"/> should be faulted with a <see cref="T:System.TimeoutException"/> if it hasn't otherwise completed.</param>
-            <param name="cancellationToken">The <see cref="T:System.Threading.CancellationToken"/> to monitor for a cancellation request.</param>
-            <typeparam name="TResult">The result <see cref="T:System.Type"/>.</typeparam>
-            <returns>The <see cref="T:System.Threading.Tasks.Task`1"/> representing the asynchronous wait.</returns>
-        </member>
-        <member name="M:Npgsql.TaskTimeoutAndCancellation.ExecuteAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},Npgsql.Util.NpgsqlTimeout,System.Threading.CancellationToken)">
-            <summary>
-            Executes a potentially non-cancellable <see cref="T:System.Threading.Tasks.Task"/> while allowing to timeout and/or cancel awaiting for it.
-            If the given task does not complete within <paramref name="timeout"/>, a <see cref="T:System.TimeoutException"/> is thrown.
-            The executed <see cref="T:System.Threading.Tasks.Task"/> may be left in an incomplete state after the <see cref="T:System.Threading.Tasks.Task"/> that this method returns completes dues to timeout and/or cancellation request.
-            The method guarantees that the abandoned, incomplete <see cref="T:System.Threading.Tasks.Task"/> is not going to produce <see cref="E:System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/> event if it fails later.
-            </summary>
-            <param name="getTaskFunc">Gets the <see cref="T:System.Threading.Tasks.Task"/> for execution with a combined <see cref="T:System.Threading.CancellationToken"/> that attempts to cancel the <see cref="T:System.Threading.Tasks.Task"/> in an event of the timeout or external cancellation request.</param>
-            <param name="timeout">The timeout after which the <see cref="T:System.Threading.Tasks.Task"/> should be faulted with a <see cref="T:System.TimeoutException"/> if it hasn't otherwise completed.</param>
-            <param name="cancellationToken">The <see cref="T:System.Threading.CancellationToken"/> to monitor for a cancellation request.</param>
-            <returns>The <see cref="T:System.Threading.Tasks.Task"/> representing the asynchronous wait.</returns>
         </member>
         <member name="T:Npgsql.TypeMapping.INpgsqlTypeMapper">
             <summary>
             A type mapper, managing how to read and write CLR values to PostgreSQL data types.
+            A type mapper exists for each connection, as well as a single global type mapper
+            (accessible via <see cref="P:NpgsqlConnection.GlobalTypeMapper"/>).
             </summary>
             <remarks>
-            The preferred way to manage type mappings is on <see cref="T:Npgsql.NpgsqlDataSourceBuilder" />. An alternative, but discouraged, method, is to
-            manage them globally via <see cref="P:Npgsql.NpgsqlConnection.GlobalTypeMapper"/>).
             </remarks>
         </member>
         <member name="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator">
             <summary>
-            The default name translator to convert CLR type names and member names. Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>.
+            The default name translator to convert CLR type names and member names.
             </summary>
         </member>
         <member name="M:Npgsql.TypeMapping.INpgsqlTypeMapper.MapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)">
@@ -10468,7 +10200,7 @@
             </param>
             <param name="nameTranslator">
             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
-            Defaults to <see cref="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator" />.
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
             </param>
             <typeparam name="TEnum">The .NET enum type to be mapped</typeparam>
         </member>
@@ -10482,7 +10214,7 @@
             </param>
             <param name="nameTranslator">
             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
-            Defaults to <see cref="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator" />.
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
             </param>
         </member>
         <member name="M:Npgsql.TypeMapping.INpgsqlTypeMapper.MapComposite``1(System.String,Npgsql.INpgsqlNameTranslator)">
@@ -10503,7 +10235,7 @@
             </param>
             <param name="nameTranslator">
             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
-            Defaults to <see cref="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator" />.
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
             </param>
             <typeparam name="T">The .NET type to be mapped</typeparam>
         </member>
@@ -10527,7 +10259,7 @@
             <remarks>
             Maps CLR fields and properties by string to PostgreSQL names.
             The translation strategy can be controlled by the <paramref name="nameTranslator"/> parameter,
-            which defaults to <see cref="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator" />.
+            which defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>.
             If there is a discrepancy between the .NET type and database type while a composite is read or written,
             an exception will be raised.
             </remarks>
@@ -10538,7 +10270,7 @@
             </param>
             <param name="nameTranslator">
             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
-            Defaults to <see cref="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator" />.
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
             </param>
         </member>
         <member name="M:Npgsql.TypeMapping.INpgsqlTypeMapper.UnmapComposite(System.Type,System.String,Npgsql.INpgsqlNameTranslator)">
@@ -10552,7 +10284,7 @@
             </param>
             <param name="nameTranslator">
             A component which will be used to translate CLR names (e.g. SomeClass) into database names (e.g. some_class).
-            Defaults to <see cref="P:Npgsql.TypeMapping.INpgsqlTypeMapper.DefaultNameTranslator" />.
+            Defaults to <see cref="T:Npgsql.NameTranslation.NpgsqlSnakeCaseNameTranslator"/>
             </param>
         </member>
         <member name="M:Npgsql.TypeMapping.INpgsqlTypeMapper.AddTypeResolverFactory(Npgsql.Internal.TypeHandling.TypeHandlerResolverFactory)">
@@ -10575,12 +10307,26 @@
             Source: <see href="https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat" />
             </remarks>
         </member>
-        <member name="M:Npgsql.TypeMapping.TypeMapper.ResolveByOID(System.UInt32)">
-            <summary>
-            Looks up a type handler by its PostgreSQL type's OID.
-            </summary>
-            <param name="oid">A PostgreSQL type OID</param>
-            <returns>A type handler that can be used to encode and decode values.</returns>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.MapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.UnmapEnum``1(System.String,Npgsql.INpgsqlNameTranslator)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.MapComposite``1(System.String,Npgsql.INpgsqlNameTranslator)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.MapComposite(System.Type,System.String,Npgsql.INpgsqlNameTranslator)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.UnmapComposite``1(System.String,Npgsql.INpgsqlNameTranslator)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.UnmapComposite(System.Type,System.String,Npgsql.INpgsqlNameTranslator)">
+            <inheritdoc />
+        </member>
+        <member name="M:Npgsql.TypeMapping.TypeMapperBase.AddTypeResolverFactory(Npgsql.Internal.TypeHandling.TypeHandlerResolverFactory)">
+            <inheritdoc />
         </member>
         <member name="T:Npgsql.Util.NpgsqlTimeout">
             <summary>
@@ -10687,15 +10433,142 @@
              as usual but the connector in a special list in the pool; it will be closed only when the scope completes.
              </remarks>
         </member>
+        <member name="F:NpgsqlTypes.NpgsqlDate.Epoch">
+            <summary>
+            Represents the date 1970-01-01
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlDate.Era">
+            <summary>
+            Represents the date 0001-01-01
+            </summary>
+        </member>
+        <member name="T:NpgsqlTypes.NpgsqlDateTime">
+            <summary>
+            A struct similar to .NET DateTime but capable of storing PostgreSQL's timestamp and timestamptz types.
+            DateTime is capable of storing values from year 1 to 9999 at 100-nanosecond precision,
+            while PostgreSQL's timestamps store values from 4713BC to 5874897AD with 1-microsecond precision.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.ToDateTime">
+            <summary>
+            Cast of an <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> to a <see cref="T:System.DateTime"/>.
+            </summary>
+            <returns>An equivalent <see cref="T:System.DateTime"/>.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.ToUniversalTime">
+            <summary>
+            Converts the value of the current <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> object to Coordinated Universal Time (UTC).
+            </summary>
+            <remarks>
+            See the MSDN documentation for DateTime.ToUniversalTime().
+            <b>Note:</b> this method <b>only</b> takes into account the time zone's base offset, and does
+            <b>not</b> respect daylight savings. See https://github.com/npgsql/npgsql/pull/684 for more
+            details.
+            </remarks>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.ToLocalTime">
+            <summary>
+            Converts the value of the current <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> object to local time.
+            </summary>
+            <remarks>
+            See the MSDN documentation for DateTime.ToLocalTime().
+            <b>Note:</b> this method <b>only</b> takes into account the time zone's base offset, and does
+            <b>not</b> respect daylight savings. See https://github.com/npgsql/npgsql/pull/684 for more
+            details.
+            </remarks>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.Add(NpgsqlTypes.NpgsqlTimeSpan@)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the value of the specified <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the value of this instance.
+            </summary>
+            <param name="value">An NpgsqlTimeSpan interval.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the time interval represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.Add(System.TimeSpan)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the value of the specified TimeSpan to the value of this instance.
+            </summary>
+            <param name="value">A positive or negative time interval.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the time interval represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddYears(System.Int32)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of years to the value of this instance.
+            </summary>
+            <param name="value">A number of years. The value parameter can be negative or positive.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the number of years represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddMonths(System.Int32)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of months to the value of this instance.
+            </summary>
+            <param name="value">A number of months. The months parameter can be negative or positive.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and months.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddDays(System.Double)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of days to the value of this instance.
+            </summary>
+            <param name="value">A number of whole and fractional days. The value parameter can be negative or positive.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the number of days represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddHours(System.Double)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of hours to the value of this instance.
+            </summary>
+            <param name="value">A number of whole and fractional hours. The value parameter can be negative or positive.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the number of hours represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddMinutes(System.Double)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of minutes to the value of this instance.
+            </summary>
+            <param name="value">A number of whole and fractional minutes. The value parameter can be negative or positive.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the number of minutes represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddSeconds(System.Double)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of minutes to the value of this instance.
+            </summary>
+            <param name="value">A number of whole and fractional minutes. The value parameter can be negative or positive.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the number of minutes represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddMilliseconds(System.Double)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of milliseconds to the value of this instance.
+            </summary>
+            <param name="value">A number of whole and fractional milliseconds. The value parameter can be negative or positive. Note that this value is rounded to the nearest integer.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the number of milliseconds represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.AddTicks(System.Int64)">
+            <summary>
+            Returns a new <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> that adds the specified number of ticks to the value of this instance.
+            </summary>
+            <param name="value">A number of 100-nanosecond ticks. The value parameter can be positive or negative.</param>
+            <returns>An object whose value is the sum of the date and time represented by this instance and the time represented by value.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.op_Implicit(System.DateTime)~NpgsqlTypes.NpgsqlDateTime">
+            <summary>
+            Implicit cast of a <see cref="T:System.DateTime"/> to an <see cref="T:NpgsqlTypes.NpgsqlDateTime"/>
+            </summary>
+            <param name="dateTime">A <see cref="T:System.DateTime"/></param>
+            <returns>An equivalent <see cref="T:NpgsqlTypes.NpgsqlDateTime"/>.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlDateTime.op_Explicit(NpgsqlTypes.NpgsqlDateTime)~System.DateTime">
+            <summary>
+            Explicit cast of an <see cref="T:NpgsqlTypes.NpgsqlDateTime"/> to a <see cref="T:System.DateTime"/>.
+            </summary>
+            <param name="npgsqlDateTime">An <see cref="T:NpgsqlTypes.NpgsqlDateTime"/>.</param>
+            <returns>An equivalent <see cref="T:System.DateTime"/>.</returns>
+        </member>
         <member name="T:NpgsqlTypes.NpgsqlDbType">
             <summary>
             Represents a PostgreSQL data type that can be written or read to the database.
             Used in places such as <see cref="P:Npgsql.NpgsqlParameter.NpgsqlDbType"/> to unambiguously specify
             how to encode or decode values.
             </summary>
-            <remarks>
-            See https://www.postgresql.org/docs/current/static/datatype.html.
-            </remarks>
+            <remarks>See https://www.postgresql.org/docs/current/static/datatype.html</remarks>
         </member>
         <member name="F:NpgsqlTypes.NpgsqlDbType.Bigint">
             <summary>
@@ -11071,19 +10944,19 @@
             <summary>
             The PostgreSQL ltree type, each value is a label path "a.label.tree.value", forming a tree in a set.
             </summary>
-            <remarks>See https://www.postgresql.org/docs/current/static/ltree.html</remarks>
+            <remarks>See http://www.postgresql.org/docs/current/static/ltree.html</remarks>
         </member>
         <member name="F:NpgsqlTypes.NpgsqlDbType.LQuery">
             <summary>
             The PostgreSQL lquery type for PostgreSQL extension ltree
             </summary>
-            <remarks>See https://www.postgresql.org/docs/current/static/ltree.html</remarks>
+            <remarks>See http://www.postgresql.org/docs/current/static/ltree.html</remarks>
         </member>
         <member name="F:NpgsqlTypes.NpgsqlDbType.LTxtQuery">
             <summary>
             The PostgreSQL ltxtquery type for PostgreSQL extension ltree
             </summary>
-            <remarks>See https://www.postgresql.org/docs/current/static/ltree.html</remarks>
+            <remarks>See http://www.postgresql.org/docs/current/static/ltree.html</remarks>
         </member>
         <member name="F:NpgsqlTypes.NpgsqlDbType.IntegerRange">
             <summary>
@@ -11801,6 +11674,652 @@
             The upper bound is both inclusive and indefinite. This represents an error condition.
             </summary>
         </member>
+        <member name="T:NpgsqlTypes.NpgsqlTimeSpan">
+            <summary>
+            Represents the PostgreSQL interval datatype.
+            </summary>
+            <remarks>PostgreSQL differs from .NET in how it's interval type doesn't assume 24 hours in a day
+            (to deal with 23- and 25-hour days caused by daylight savings adjustments) and has a concept
+            of months that doesn't exist in .NET's <see cref="T:System.TimeSpan"/> class. (Neither datatype
+            has any concessions for leap-seconds).
+            <para>For most uses just casting to and from TimeSpan will work correctly &#x2014; in particular,
+            the results of subtracting one <see cref="T:System.DateTime"/> or the PostgreSQL date, time and
+            timestamp types from another should be the same whether you do so in .NET or PostgreSQL &#x2014;
+            but if the handling of days and months in PostgreSQL is important to your application then you
+            should use this class instead of <see cref="T:System.TimeSpan"/>.</para>
+            <para>If you don't know whether these differences are important to your application, they
+            probably arent! Just use <see cref="T:System.TimeSpan"/> and do not use this class directly &#x263a;</para>
+            <para>To avoid forcing unnecessary provider-specific concerns on users who need not be concerned
+            with them a call to <see cref="M:System.Data.IDataRecord.GetValue(System.Int32)"/> on a field containing an
+            <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> value will return a <see cref="T:System.TimeSpan"/> rather than an
+            <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>. If you need the extra functionality of <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>
+            then use <see cref="M:Npgsql.NpgsqlDataReader.GetInterval(System.Int32)"/>.</para>
+            </remarks>
+            <seealso cref="P:NpgsqlTypes.NpgsqlTimeSpan.Ticks"/>
+            <seealso cref="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyDays"/>
+            <seealso cref="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyMonths"/>
+            <seealso cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerMicrosecond">
+            <summary>
+            Represents the number of ticks (100ns periods) in one microsecond. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerMillsecond">
+            <summary>
+            Represents the number of ticks (100ns periods) in one millisecond. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerSecond">
+            <summary>
+            Represents the number of ticks (100ns periods) in one second. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerMinute">
+            <summary>
+            Represents the number of ticks (100ns periods) in one minute. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerHour">
+            <summary>
+            Represents the number of ticks (100ns periods) in one hour. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerDay">
+            <summary>
+            Represents the number of ticks (100ns periods) in one day. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.HoursPerDay">
+            <summary>
+            Represents the number of hours in one day (assuming no daylight savings adjustments). This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.DaysPerMonth">
+            <summary>
+            Represents the number of days assumed in one month if month justification or unjustifcation is performed.
+            This is set to 30 for consistency with PostgreSQL. Note that this is means that month adjustments cause
+            a year to be taken as 30 &#xd7; 12 = 360 rather than 356/366 days.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.TicksPerMonth">
+            <summary>
+            Represents the number of ticks (100ns periods) in one day, assuming 30 days per month. <seealso cref="F:NpgsqlTypes.NpgsqlTimeSpan.DaysPerMonth"/>
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.MonthsPerYear">
+            <summary>
+            Represents the number of months in a year. This field is constant.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.MaxValue">
+            <summary>
+            Represents the maximum <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>. This field is read-only.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.MinValue">
+            <summary>
+            Represents the minimum <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>. This field is read-only.
+            </summary>
+        </member>
+        <member name="F:NpgsqlTypes.NpgsqlTimeSpan.Zero">
+            <summary>
+            Represents the zero <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>. This field is read-only.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.Int64)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the specified number of ticks.
+            </summary>
+            <param name="ticks">A time period expressed in 100ns units.</param>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.TimeSpan)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to hold the same time as a <see cref="T:System.TimeSpan"/>
+            </summary>
+            <param name="timespan">A time period expressed in a <see cref="T:System.TimeSpan"/></param>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.Int32,System.Int32,System.Int64)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the specified number of months, days
+            &amp; ticks.
+            </summary>
+            <param name="months">Number of months.</param>
+            <param name="days">Number of days.</param>
+            <param name="ticks">Number of 100ns units.</param>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the specified number of
+            days, hours, minutes &amp; seconds.
+            </summary>
+            <param name="days">Number of days.</param>
+            <param name="hours">Number of hours.</param>
+            <param name="minutes">Number of minutes.</param>
+            <param name="seconds">Number of seconds.</param>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.Int32,System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the specified number of
+            days, hours, minutes, seconds &amp; milliseconds.
+            </summary>
+            <param name="days">Number of days.</param>
+            <param name="hours">Number of hours.</param>
+            <param name="minutes">Number of minutes.</param>
+            <param name="seconds">Number of seconds.</param>
+            <param name="milliseconds">Number of milliseconds.</param>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.Int32,System.Int32,System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the specified number of
+            months, days, hours, minutes, seconds &amp; milliseconds.
+            </summary>
+            <param name="months">Number of months.</param>
+            <param name="days">Number of days.</param>
+            <param name="hours">Number of hours.</param>
+            <param name="minutes">Number of minutes.</param>
+            <param name="seconds">Number of seconds.</param>
+            <param name="milliseconds">Number of milliseconds.</param>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.#ctor(System.Int32,System.Int32,System.Int32,System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Initializes a new <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to the specified number of
+            years, months, days, hours, minutes, seconds &amp; milliseconds.
+            <para>Years are calculated exactly equivalent to 12 months.</para>
+            </summary>
+            <param name="years">Number of years.</param>
+            <param name="months">Number of months.</param>
+            <param name="days">Number of days.</param>
+            <param name="hours">Number of hours.</param>
+            <param name="minutes">Number of minutes.</param>
+            <param name="seconds">Number of seconds.</param>
+            <param name="milliseconds">Number of milliseconds.</param>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Ticks">
+            <summary>
+            The total number of ticks(100ns units) contained. This is the resolution of the
+            <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>  type. This ignores the number of days and
+            months held. If you want them included use <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.UnjustifyInterval"/> first.
+            <remarks>The resolution of the PostgreSQL
+            interval type is by default 1&#xb5;s = 1,000 ns. It may be smaller as follows:
+            <list type="number">
+            <item>
+            <term>interval(0)</term>
+            <description>resolution of 1s (1 second)</description>
+            </item>
+            <item>
+            <term>interval(1)</term>
+            <description>resolution of 100ms = 0.1s (100 milliseconds)</description>
+            </item>
+            <item>
+            <term>interval(2)</term>
+            <description>resolution of 10ms = 0.01s (10 milliseconds)</description>
+            </item>
+            <item>
+            <term>interval(3)</term>
+            <description>resolution of 1ms = 0.001s (1 millisecond)</description>
+            </item>
+            <item>
+            <term>interval(4)</term>
+            <description>resolution of 100&#xb5;s = 0.0001s (100 microseconds)</description>
+            </item>
+            <item>
+            <term>interval(5)</term>
+            <description>resolution of 10&#xb5;s = 0.00001s (10 microseconds)</description>
+            </item>
+            <item>
+            <term>interval(6) or interval</term>
+            <description>resolution of 1&#xb5;s = 0.000001s (1 microsecond)</description>
+            </item>
+            </list>
+            <para>As such, if the 100-nanosecond resolution is significant to an application, a PostgreSQL interval will
+            not suffice for those purposes.</para>
+            <para>In more frequent cases though, the resolution of the interval suffices.
+            <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> will always suffice to handle the resolution of any interval value, and upon
+            writing to the database, will be rounded to the resolution used.</para>
+            </remarks>
+            <returns>The number of ticks in the instance.</returns>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Microseconds">
+            <summary>
+            Gets the number of whole microseconds held in the instance.
+            <returns>An  in the range [-999999, 999999].</returns>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Milliseconds">
+            <summary>
+            Gets the number of whole milliseconds held in the instance.
+            <returns>An  in the range [-999, 999].</returns>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Seconds">
+            <summary>
+            Gets the number of whole seconds held in the instance.
+            <returns>An  in the range [-59, 59].</returns>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Minutes">
+            <summary>
+            Gets the number of whole minutes held in the instance.
+            <returns>An  in the range [-59, 59].</returns>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Hours">
+            <summary>
+            Gets the number of whole hours held in the instance.
+            <remarks>Note that this can be less than -23 or greater than 23 unless <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyDays"/>
+            has been used to produce this instance.</remarks>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Days">
+            <summary>
+            Gets the number of days held in the instance.
+            <remarks>Note that this does not pay attention to a time component with -24 or less hours or
+            24 or more hours, unless <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyDays"/> has been called to produce this instance.</remarks>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Months">
+            <summary>
+            Gets the number of months held in the instance.
+            <remarks>Note that this does not pay attention to a day component with -30 or less days or
+            30 or more days, unless <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyMonths"/> has been called to produce this instance.</remarks>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.Time">
+            <summary>
+            Returns a <see cref="T:System.TimeSpan"/> representing the time component of the instance.
+            <remarks>Note that this may have a value beyond the range &#xb1;23:59:59.9999999 unless
+            <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyDays"/> has been called to produce this instance.</remarks>
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalTicks">
+            <summary>
+            The total number of ticks (100ns units) in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalMicroseconds">
+            <summary>
+            The total number of microseconds in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalMilliseconds">
+            <summary>
+            The total number of milliseconds in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalSeconds">
+            <summary>
+            The total number of seconds in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalMinutes">
+            <summary>
+            The total number of minutes in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalHours">
+            <summary>
+            The total number of hours in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalDays">
+            <summary>
+            The total number of days in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="P:NpgsqlTypes.NpgsqlTimeSpan.TotalMonths">
+            <summary>
+            The total number of months in the instance, assuming 24 hours in each day and
+            30 days in a month.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromTicks(System.Int64)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of ticks.
+            </summary>
+            <param name="ticks">The number of ticks (100ns units) in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of ticks.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromMicroseconds(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of microseconds.
+            </summary>
+            <param name="micro">The number of microseconds in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of microseconds.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromMilliseconds(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of milliseconds.
+            </summary>
+            <param name="milli">The number of milliseconds in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of milliseconds.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromSeconds(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of seconds.
+            </summary>
+            <param name="seconds">The number of seconds in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of seconds.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromMinutes(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of minutes.
+            </summary>
+            <param name="minutes">The number of minutes in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of minutes.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromHours(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of hours.
+            </summary>
+            <param name="hours">The number of hours in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of hours.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromDays(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of days.
+            </summary>
+            <param name="days">The number of days in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of days.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.FromMonths(System.Double)">
+            <summary>
+            Creates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from a number of months.
+            </summary>
+            <param name="months">The number of months in the interval.</param>
+            <returns>A <see cref="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize"/>d <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> with the given number of months.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Add(NpgsqlTypes.NpgsqlTimeSpan@)">
+            <summary>
+            Adds another interval to this instance and returns the result.
+            </summary>
+            <param name="interval">An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to add to this instance.</param>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose values are the sums of the two instances.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Subtract(NpgsqlTypes.NpgsqlTimeSpan@)">
+            <summary>
+            Subtracts another interval from this instance and returns the result.
+            </summary>
+            <param name="interval">An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to subtract from this instance.</param>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose values are the differences of the two instances.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Negate">
+            <summary>
+            Returns an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose value is the negated value of this instance.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose value is the negated value of this instance.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Duration">
+            <summary>
+            This absolute value of this instance. In the case of some, but not all, components being negative,
+            the rules used for justification are used to determine if the instance is positive or negative.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose value is the absolute value of this instance.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyDays">
+            <summary>
+            Equivalent to PostgreSQL's justify_days function.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one, but with any hours outside of the range [-23, 23]
+            converted into days.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.UnjustifyDays">
+            <summary>
+            Opposite to PostgreSQL's justify_days function.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one, but with any days converted to multiples of &#xB1;24hours.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyMonths">
+            <summary>
+            Equivalent to PostgreSQL's justify_months function.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one, but with any days outside of the range [-30, 30]
+            converted into months.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.UnjustifyMonths">
+            <summary>
+            Opposite to PostgreSQL's justify_months function.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one, but with any months converted to multiples of &#xB1;30days.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.JustifyInterval">
+            <summary>
+            Equivalent to PostgreSQL's justify_interval function.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one,
+            but with any months converted to multiples of &#xB1;30days
+            and then with any days converted to multiples of &#xB1;24hours</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.UnjustifyInterval">
+            <summary>
+            Opposite to PostgreSQL's justify_interval function.
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one, but with any months converted to multiples of &#xB1;30days and then any days converted to multiples of &#xB1;24hours;</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Canonicalize">
+            <summary>
+            Produces a canonical NpgslInterval with 0 months and hours in the range of [-23, 23].
+            <remarks>
+            <para>
+            While the fact that for many purposes, two different <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances could be considered
+            equivalent (e.g. one with 2days, 3hours and one with 1day 27hours) there are different possible canonical forms.
+            </para><para>
+            E.g. we could move all excess hours into days and all excess days into months and have the most readable form,
+            or we could move everything into the ticks and have the form that allows for the easiest arithmetic) the form
+            chosen has two important properties that make it the best choice.
+            </para><para>First, it is closest two how
+            <see cref="T:System.TimeSpan"/> objects are most often represented. Second, it is compatible with results of many
+            PostgreSQL functions, particularly with age() and the results of subtracting one date, time or timestamp from
+            another.
+            </para>
+            <para>Note that the results of casting a <see cref="T:System.TimeSpan"/> to <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is
+            canonicalised.</para>
+            </remarks>
+            </summary>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> based on this one, but with months converted to multiples of &#xB1;30days and with any hours outside of the range [-23, 23]
+            converted into days.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_Implicit(System.TimeSpan)~NpgsqlTypes.NpgsqlTimeSpan">
+            <summary>
+            Implicit cast of a <see cref="T:System.TimeSpan"/> to an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>
+            </summary>
+            <param name="timespan">A <see cref="T:System.TimeSpan"/></param>
+            <returns>An eqivalent, canonical, <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.ToNpgsqlTimeSpan(System.TimeSpan)">
+            <summary>
+            Casts a <see cref="T:System.TimeSpan"/> to an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_Explicit(NpgsqlTypes.NpgsqlTimeSpan)~System.TimeSpan">
+            <summary>
+            Explicit cast of an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to a <see cref="T:System.TimeSpan"/>.
+            </summary>
+            <param name="interval">A <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</param>
+            <returns>An equivalent <see cref="T:System.TimeSpan"/>.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.ToTimeSpan(NpgsqlTypes.NpgsqlTimeSpan@)">
+            <summary>
+            Casts an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to a <see cref="T:System.TimeSpan"/>.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Equals(NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Returns true if another <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is exactly the same as this instance.
+            </summary>
+            <param name="other">An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> for comparison.</param>
+            <returns>true if the two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances are exactly the same,
+            false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Equals(System.Object)">
+            <summary>
+            Returns true if another object is an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>, that is exactly the same as
+            this instance
+            </summary>
+            <param name="obj">An <see cref="T:System.Object"/> for comparison.</param>
+            <returns>true if the argument is an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> and is exactly the same
+            as this one, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Compare(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Compares two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances.
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</param>
+            <returns>0 if the two are equal or equivalent. A value greater than zero if x is greater than y,
+            a value less than zero if x is less than y.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.GetHashCode">
+            <summary>
+            A hash code suitable for uses with hashing algorithms.
+            </summary>
+            <returns>An signed integer.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.CompareTo(NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Compares this instance with another/
+            </summary>
+            <param name="other">An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare this with.</param>
+            <returns>0 if the instances are equal or equivalent. A value less than zero if
+            this instance is less than the argument. A value greater than zero if this instance
+            is greater than the instance.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.CompareTo(System.Object)">
+            <summary>
+            Compares this instance with another/
+            </summary>
+            <param name="other">An object to compare this with.</param>
+            <returns>0 if the argument is an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> and the instances are equal or equivalent.
+            A value less than zero if the argument is an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> and
+            this instance is less than the argument.
+            A value greater than zero if the argument is an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> and this instance
+            is greater than the instance.</returns>
+            A value greater than zero if the argument is null.
+            <exception cref="T:System.ArgumentException">The argument is not an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</exception>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Parse(System.String)">
+            <summary>
+            Parses a <see cref="T:System.String"/> and returns a <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instance.
+            Designed to use the formats generally returned by PostgreSQL.
+            </summary>
+            <param name="str">The <see cref="T:System.String"/> to parse.</param>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> represented by the argument.</returns>
+            <exception cref="T:System.ArgumentNullException">The string was null.</exception>
+            <exception cref="T:System.OverflowException">A value obtained from parsing the string exceeded the values allowed for the relevant component.</exception>
+            <exception cref="T:System.FormatException">The string was not in a format that could be parsed to produce an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</exception>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.TryParse(System.String,NpgsqlTypes.NpgsqlTimeSpan@)">
+            <summary>
+            Attempt to parse a <see cref="T:System.String"/> to produce an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.
+            </summary>
+            <param name="str">The <see cref="T:System.String"/> to parse.</param>
+            <param name="result">(out) The <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> produced, or <see cref="F:NpgsqlTypes.NpgsqlTimeSpan.Zero"/> if the parsing failed.</param>
+            <returns>true if the parsing succeeded, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.ToString">
+            <summary>
+            Create a <see cref="T:System.String"/> representation of the <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instance.
+            The format returned is of the form:
+            [M mon[s]] [d day[s]] [HH:mm:ss[.f[f[f[f[f[f[f[f[f]]]]]]]]]]
+            A zero <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is represented as 00:00:00
+            <remarks>
+            Ticks are 100ns, Postgress resolution is only to 1&#xb5;s at most. Hence we lose 1 or more decimal
+            precision in storing values in the database. Despite this, this method will output that extra
+            digit of precision. It's forward-compatible with any future increases in resolution up to 100ns,
+            and also makes this ToString() more applicable to any other use-case.
+            </remarks>
+            </summary>
+            <returns>The <see cref="T:System.String"/> representation.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_Addition(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Adds two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> together.
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to add.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to add.</param>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose values are the sum of the arguments.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_Subtraction(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Subtracts one <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> from another.
+            </summary>
+            <param name="x">The <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to subtract the other from.</param>
+            <param name="y">The <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to subtract from the other.</param>
+            <returns>An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> whose values are the difference of the arguments</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_Equality(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Returns true if two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> are exactly the same.
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <returns>true if the two arguments are exactly the same, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_Inequality(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Returns false if two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> are exactly the same.
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <returns>false if the two arguments are exactly the same, true otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_LessThan(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Compares two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances to see if the first is less than the second
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <returns>true if the first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is less than second, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_LessThanOrEqual(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Compares two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances to see if the first is less than or equivalent to the second
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <returns>true if the first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is less than or equivalent to second, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_GreaterThan(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Compares two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances to see if the first is greater than the second
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <returns>true if the first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is greater than second, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_GreaterThanOrEqual(NpgsqlTypes.NpgsqlTimeSpan,NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Compares two <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instances to see if the first is greater than or equivalent the second
+            </summary>
+            <param name="x">The first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <param name="y">The second <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> to compare.</param>
+            <returns>true if the first <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> is greater than or equivalent to the second, false otherwise.</returns>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_UnaryPlus(NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Returns the instance.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.Plus(NpgsqlTypes.NpgsqlTimeSpan@)">
+            <summary>
+            Returns the instance.
+            </summary>
+        </member>
+        <member name="M:NpgsqlTypes.NpgsqlTimeSpan.op_UnaryNegation(NpgsqlTypes.NpgsqlTimeSpan)">
+            <summary>
+            Negates an <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/> instance.
+            </summary>
+            <param name="x">An <see cref="T:NpgsqlTypes.NpgsqlTimeSpan"/>.</param>
+            <returns>The negation of the argument.</returns>
+        </member>
         <member name="T:NpgsqlTypes.NpgsqlTsQuery">
             <summary>
             Represents a PostgreSQL tsquery. This is the base class for the
@@ -12363,7 +12882,7 @@
         </member>
         <member name="T:NpgsqlTypes.PgNameAttribute">
             <summary>
-            Indicates that this property or field corresponds to a PostgreSQL field with the specified name
+            Indicates that this property or field correspond to a PostgreSQL field with the specified name
             </summary>
         </member>
         <member name="P:NpgsqlTypes.PgNameAttribute.PgName">
@@ -12373,7 +12892,7 @@
         </member>
         <member name="M:NpgsqlTypes.PgNameAttribute.#ctor(System.String)">
             <summary>
-            Indicates that this property or field corresponds to a PostgreSQL field with the specified name
+            Indicates that this property or field correspond to a PostgreSQL field with the specified name
             </summary>
             <param name="pgName">The name of PostgreSQL field that corresponds to this CLR property or field</param>
         </member>

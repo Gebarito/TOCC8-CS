@@ -46,3 +46,4 @@ F:\workspace\cs-solutions\TOCC8-PDV\TOCC8-PDV\obj\Debug\TOCC8-PDV.csproj.Up2Date
 F:\workspace\cs-solutions\TOCC8-PDV\TOCC8-PDV\obj\Debug\TOCC8-PDV.exe
 F:\workspace\cs-solutions\TOCC8-PDV\TOCC8-PDV\obj\Debug\TOCC8-PDV.pdb
 F:\workspace\cs-solutions\TOCC8-PDV\TOCC8-PDV\obj\Debug\TOCC8-PDV.exe.config
+F:\workspace\cs-solutions\TOCC8-PDV\TOCC8-PDV\obj\Debug\TOCC8_PDV.FGrafico.resources

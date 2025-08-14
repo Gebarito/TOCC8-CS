@@ -45,9 +45,8 @@
             this.btnListar = new System.Windows.Forms.Button();
             this.btnAtualizar = new System.Windows.Forms.Button();
             this.btnCadastrar = new System.Windows.Forms.Button();
-            this.lblConsultaCodigo = new System.Windows.Forms.Label();
-            this.txtConsultaCodigo = new System.Windows.Forms.TextBox();
             this.dgvProduto = new System.Windows.Forms.DataGridView();
+            this.lblTitulo = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.dgvProduto)).BeginInit();
             this.SuspendLayout();
             // 
@@ -118,6 +117,7 @@
             this.txtDescricao.Name = "txtDescricao";
             this.txtDescricao.Size = new System.Drawing.Size(212, 67);
             this.txtDescricao.TabIndex = 32;
+            this.txtDescricao.KeyUp += new System.Windows.Forms.KeyEventHandler(this.txtDescricao_KeyUp);
             // 
             // lblDescricao
             // 
@@ -159,6 +159,7 @@
             this.txtCodigo.Name = "txtCodigo";
             this.txtCodigo.Size = new System.Drawing.Size(88, 20);
             this.txtCodigo.TabIndex = 27;
+            this.txtCodigo.Leave += new System.EventHandler(this.txtCodigo_Leave);
             // 
             // btnRemover
             // 
@@ -201,22 +202,6 @@
             this.btnCadastrar.UseVisualStyleBackColor = true;
             this.btnCadastrar.Click += new System.EventHandler(this.btnCadastrar_Click);
             // 
-            // lblConsultaCodigo
-            // 
-            this.lblConsultaCodigo.AutoSize = true;
-            this.lblConsultaCodigo.Location = new System.Drawing.Point(9, 10);
-            this.lblConsultaCodigo.Name = "lblConsultaCodigo";
-            this.lblConsultaCodigo.Size = new System.Drawing.Size(104, 13);
-            this.lblConsultaCodigo.TabIndex = 22;
-            this.lblConsultaCodigo.Text = "Consulta por código:";
-            // 
-            // txtConsultaCodigo
-            // 
-            this.txtConsultaCodigo.Location = new System.Drawing.Point(12, 26);
-            this.txtConsultaCodigo.Name = "txtConsultaCodigo";
-            this.txtConsultaCodigo.Size = new System.Drawing.Size(760, 20);
-            this.txtConsultaCodigo.TabIndex = 21;
-            // 
             // dgvProduto
             // 
             this.dgvProduto.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
@@ -227,11 +212,22 @@
             this.dgvProduto.TabIndex = 20;
             this.dgvProduto.CellDoubleClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.dgvProduto_CellDoubleClick);
             // 
+            // lblTitulo
+            // 
+            this.lblTitulo.AutoSize = true;
+            this.lblTitulo.Font = new System.Drawing.Font("Microsoft Sans Serif", 20F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblTitulo.Location = new System.Drawing.Point(268, 9);
+            this.lblTitulo.Name = "lblTitulo";
+            this.lblTitulo.Size = new System.Drawing.Size(239, 31);
+            this.lblTitulo.TabIndex = 40;
+            this.lblTitulo.Text = "TOCC8 - Produtos";
+            // 
             // FMain
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(780, 507);
+            this.Controls.Add(this.lblTitulo);
             this.Controls.Add(this.txtPrazoValidade);
             this.Controls.Add(this.lblPrazoValidade);
             this.Controls.Add(this.btnGrafico);
@@ -249,8 +245,6 @@
             this.Controls.Add(this.btnListar);
             this.Controls.Add(this.btnAtualizar);
             this.Controls.Add(this.btnCadastrar);
-            this.Controls.Add(this.lblConsultaCodigo);
-            this.Controls.Add(this.txtConsultaCodigo);
             this.Controls.Add(this.dgvProduto);
             this.Name = "FMain";
             this.Text = "TOCC8 - Tela de Cadastro";
@@ -279,9 +273,8 @@
         private System.Windows.Forms.Button btnListar;
         private System.Windows.Forms.Button btnAtualizar;
         private System.Windows.Forms.Button btnCadastrar;
-        private System.Windows.Forms.Label lblConsultaCodigo;
-        private System.Windows.Forms.TextBox txtConsultaCodigo;
         private System.Windows.Forms.DataGridView dgvProduto;
+        private System.Windows.Forms.Label lblTitulo;
     }
 }
 
