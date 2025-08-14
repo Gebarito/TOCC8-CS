@@ -141,5 +141,23 @@ namespace TOCC8_PDV
             }
 
         }
+
+        private void btnGrafico_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void dgvProduto_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            int linha;
+            linha = this.dgvProduto.SelectedCells[0].RowIndex;
+            this.txtCodigo.Text = dgvProduto.Rows[linha].Cells[0].Value.ToString();
+            this.txtDescricao.Text = dgvProduto.Rows[linha].Cells[1].Value.ToString();
+            this.dtpDataValidade.Text = dgvProduto.Rows[linha].Cells[2].Value.ToString();
+            this.txtPreco.Text = dgvProduto.Rows[linha].Cells[3].Value.ToString();
+            this.txtTaxaLucro.Text = dgvProduto.Rows[linha].Cells[4].Value.ToString();
+            this.txtPrazoValidade.Text = (Convert.ToDateTime(dtpDataValidade.Text) - DateTime.Now).Days.ToString() + " dias";
+        }
+
     }
 }

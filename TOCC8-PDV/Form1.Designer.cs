@@ -76,6 +76,7 @@
             this.btnGrafico.TabIndex = 37;
             this.btnGrafico.Text = "Gráfico";
             this.btnGrafico.UseVisualStyleBackColor = true;
+            this.btnGrafico.Click += new System.EventHandler(this.btnGrafico_Click);
             // 
             // txtTaxaLucro
             // 
@@ -156,7 +157,6 @@
             // 
             this.txtCodigo.Location = new System.Drawing.Point(12, 392);
             this.txtCodigo.Name = "txtCodigo";
-            this.txtCodigo.ReadOnly = true;
             this.txtCodigo.Size = new System.Drawing.Size(88, 20);
             this.txtCodigo.TabIndex = 27;
             // 
@@ -219,11 +219,13 @@
             // 
             // dgvProduto
             // 
+            this.dgvProduto.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
             this.dgvProduto.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvProduto.Location = new System.Drawing.Point(12, 52);
             this.dgvProduto.Name = "dgvProduto";
             this.dgvProduto.Size = new System.Drawing.Size(757, 321);
             this.dgvProduto.TabIndex = 20;
+            this.dgvProduto.CellDoubleClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.dgvProduto_CellDoubleClick);
             // 
             // FMain
             // 
