@@ -39,7 +39,6 @@ namespace TOCC8_PDV
                 chartProduto.Series["PrazoValidade"].ChartType = SeriesChartType.Column;
                 chartProduto.Series["PrazoValidade"].Color = Color.Orange;
 
-
                 chartProduto.Titles.Clear();
                 chartProduto.Titles.Add("Lucro x Prazo de Validade");
 
@@ -50,8 +49,6 @@ namespace TOCC8_PDV
                     chartProduto.Series["Lucro"].Points.AddXY(p.descricao, p.taxalucro);
                     chartProduto.Series["PrazoValidade"].Points.AddXY(p.descricao, prazoValidade);
                 }
-
-
             }
             catch (Exception ex) 
             {

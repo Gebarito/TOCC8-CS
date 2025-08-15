@@ -44,12 +44,8 @@ namespace TOCC8_PDV
             finally
             {
                 MessageBox.Show(msg, "Cadastro de Produto", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                txtDescricao.Clear();
-                txtPreco.Clear();
-                txtTaxaLucro.Clear();
-                txtPrazoValidade.Clear();
-                dtpDataValidade.Value = DateTime.Now;
-                txtDescricao.Focus();
+                ClearAndFocus();
+                this.btnListar.PerformClick();
             }
         }
 
@@ -97,13 +93,7 @@ namespace TOCC8_PDV
             finally
             {
                 MessageBox.Show(msg, "Atualização de Produto", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                txtCodigo.Clear();
-                txtDescricao.Clear();
-                txtPreco.Clear();
-                txtTaxaLucro.Clear();
-                txtPrazoValidade.Clear();
-                dtpDataValidade.Value = DateTime.Now;
-                txtCodigo.Focus();
+                ClearAndFocus();
             }
         }
 
@@ -134,13 +124,7 @@ namespace TOCC8_PDV
             finally
             {
                 MessageBox.Show(msg, "Remoção de Produto", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                txtCodigo.Clear();
-                txtDescricao.Clear();
-                txtPreco.Clear();
-                txtTaxaLucro.Clear();
-                txtPrazoValidade.Clear();
-                dtpDataValidade.Value = DateTime.Now;
-                txtCodigo.Focus();
+                ClearAndFocus();
             }
 
         }
@@ -205,12 +189,23 @@ namespace TOCC8_PDV
 
             try
             {
-
                 contexto = new TOCC8Entities();
                 var produtos = contexto.produto.Where(c => c.descricao.StartsWith(txtDescricao.Text.ToLower()));
                 this.dgvProduto.DataSource = produtos.ToList();
             }
             catch (Exception) { throw; }
         }
+        
+        private void ClearAndFocus()
+        {
+            txtCodigo.Clear();
+            txtDescricao.Clear();
+            txtPreco.Clear();
+            txtTaxaLucro.Clear();
+            txtPrazoValidade.Clear();
+            dtpDataValidade.Value = DateTime.Now;
+            txtCodigo.Focus();
+        }
     }
+
 }
