@@ -28,28 +28,28 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea2 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
-            System.Windows.Forms.DataVisualization.Charting.Legend legend2 = new System.Windows.Forms.DataVisualization.Charting.Legend();
-            System.Windows.Forms.DataVisualization.Charting.Series series2 = new System.Windows.Forms.DataVisualization.Charting.Series();
+            System.Windows.Forms.DataVisualization.Charting.ChartArea chartArea1 = new System.Windows.Forms.DataVisualization.Charting.ChartArea();
+            System.Windows.Forms.DataVisualization.Charting.Legend legend1 = new System.Windows.Forms.DataVisualization.Charting.Legend();
+            System.Windows.Forms.DataVisualization.Charting.Series series1 = new System.Windows.Forms.DataVisualization.Charting.Series();
             this.chartProduto = new System.Windows.Forms.DataVisualization.Charting.Chart();
             ((System.ComponentModel.ISupportInitialize)(this.chartProduto)).BeginInit();
             this.SuspendLayout();
             // 
             // chartProduto
             // 
-            chartArea2.Name = "ChartArea1";
-            this.chartProduto.ChartAreas.Add(chartArea2);
-            legend2.Name = "Legend1";
-            this.chartProduto.Legends.Add(legend2);
+            chartArea1.Name = "ChartArea1";
+            this.chartProduto.ChartAreas.Add(chartArea1);
+            legend1.Name = "Legend1";
+            this.chartProduto.Legends.Add(legend1);
             this.chartProduto.Location = new System.Drawing.Point(12, 12);
             this.chartProduto.Name = "chartProduto";
-            series2.ChartArea = "ChartArea1";
-            series2.Legend = "Legend1";
-            series2.Name = "Series1";
-            this.chartProduto.Series.Add(series2);
+            series1.ChartArea = "ChartArea1";
+            series1.Legend = "Legend1";
+            series1.Name = "Series1";
+            this.chartProduto.Series.Add(series1);
             this.chartProduto.Size = new System.Drawing.Size(776, 426);
             this.chartProduto.TabIndex = 0;
-            this.chartProduto.Text = "Produto";
+            this.chartProduto.Text = "chart1";
             // 
             // FGrafico
             // 
