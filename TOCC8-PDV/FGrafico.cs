@@ -45,8 +45,9 @@ namespace TOCC8_PDV
                 foreach (var p in produtos)
                 {
                     var prazoValidade = (Convert.ToDateTime(p.datavalidade) - DateTime.Now).Days;
+                    double lucroUnitario = (double)(p.preco - p.taxalucro);
 
-                    chartProduto.Series["Lucro"].Points.AddXY(p.descricao, p.taxalucro);
+                    chartProduto.Series["Lucro"].Points.AddXY(p.descricao, lucroUnitario);
                     chartProduto.Series["PrazoValidade"].Points.AddXY(p.descricao, prazoValidade);
                 }
             }
